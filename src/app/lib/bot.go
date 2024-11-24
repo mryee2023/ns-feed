@@ -66,9 +66,9 @@ func (t *TelegramNotifier) Notify(msg NotifyMessage) {
 	tgMsg.DisableWebPagePreview = false
 	v, e := tg.Send(tgMsg)
 	if e != nil {
-		logx.Errorw("send telegram message error", logx.Field("error", e), logx.Field("msg", tgMsg.Text), logx.Field("chatId", tgMsg.ChatID))
+		logx.Errorw("send telegram message failure", logx.Field("error", e), logx.Field("msg", msg.Text), logx.Field("chatId", tgMsg.ChatID))
 	} else {
-		logx.Infow("send telegram message success", logx.Field("result", v.MessageID), logx.Field("msg", tgMsg.Text), logx.Field("chatId", tgMsg.ChatID))
+		logx.Infow("send telegram message success", logx.Field("result", v.MessageID), logx.Field("msg", msg.Text), logx.Field("chatId", tgMsg.ChatID))
 	}
 
 }

@@ -41,7 +41,7 @@ func TestConfig_Storage(t *testing.T) {
 				TgChatId:    tt.fields.TgChatId,
 				NsFeed:      tt.fields.NsFeed,
 				AlterChatId: tt.fields.AlterChatId,
-				Keywords:    tt.fields.Keywords,
+				//Keywords:    tt.fields.Keywords,
 			}
 			c.Storage(tt.args.path)
 		})
