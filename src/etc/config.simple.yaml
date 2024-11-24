@@ -10,8 +10,13 @@ channels:
         - ggy
         - pikpak
       status: ""
-
     - name: "NS通知\U0001F4E2"
       chatId: -1002354873512
       keywords: []
       status: ""
+    - name: 我的测试频道
+      chatId: -1002275646452
+      keywords:
+        - mk
+        - bgp.gd
+      status: "on"

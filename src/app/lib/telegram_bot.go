@@ -174,8 +174,8 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 
 func processDeleteEvent(cfg *config.Config, postText string, channel *tgbotapi.Chat, currentChannel *config.ChannelInfo) (*tgbotapi.MessageConfig, error) {
 	words := strings.Split(postText, " ")
-	var keywords []string
-	var deletes []string
+	var deletes = make(map[string]struct{})
+	var delWords []string
 	words = funk.FilterString(words, func(s string) bool {
 		return strings.TrimSpace(s) != ""
 	})
@@ -186,18 +186,30 @@ func processDeleteEvent(cfg *config.Config, postText string, channel *tgbotapi.C
 	}
 	words = words[1:]
 	for _, word := range words {
+		if word == "" {
+			continue
+		}
+
 		for _, v := range currentChannel.Keywords {
-			if strings.ToLower(v) == strings.ToLower(word) {
-				deletes = append(deletes, word)
-			} else {
-				keywords = append(keywords, v)
+			_, ok := deletes[v]
+			if strings.ToLower(v) == strings.ToLower(word) && !ok {
+				deletes[word] = struct{}{}
+				delWords = append(delWords, word)
 			}
 		}
 	}
-	currentChannel.Keywords = keywords
-	deletes = funk.UniqString(deletes)
+
+	var newWords []string
+
+	for _, v := range currentChannel.Keywords {
+		if _, ok := deletes[v]; !ok {
+			newWords = append(newWords, v)
+		}
+	}
+
+	currentChannel.Keywords = newWords
 	cfg.Storage(app.ConfigFilePath)
-	msg := tgbotapi.NewMessage(channel.ID, "关键字删除成功 "+strings.Join(deletes, " , "))
+	msg := tgbotapi.NewMessage(channel.ID, "关键字删除成功 "+strings.Join(delWords, " , "))
 	return &msg, nil
 }
 
