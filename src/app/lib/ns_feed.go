@@ -95,7 +95,7 @@ func hasKeyword(title string, keywords []string) bool {
 var mutex sync.Mutex
 
 func (f *NsFeed) postToChannel(c *config.ChannelInfo, feed *gofeed.Feed) {
-	if len(c.Keywords) == 0 {
+	if len(c.Keywords) == 0 || c.Status == "off" {
 		return
 	}
 	mutex.Lock()

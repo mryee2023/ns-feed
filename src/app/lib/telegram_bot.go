@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"errors"
 	"strings"
 	"sync"
 
@@ -13,6 +14,17 @@ import (
 	"ns-rss/src/app/config"
 )
 
+var help = `
+/list 列出当前所有关键字
+
+/add {keyword} 增加新的关键字
+
+/delete {keyword} 删除关键字
+
+/on 开启关键字通知
+
+/off 关闭关键字通知
+`
 var tgBot *tgbotapi.BotAPI
 
 //var startTime = time.Now()
@@ -97,7 +109,8 @@ var processMutex sync.Mutex
 func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 	channel := update.ChannelPost.Chat
 	post := update.ChannelPost
-	var msg tgbotapi.MessageConfig
+	var msg *tgbotapi.MessageConfig
+	var err error
 	logx.Infow("receive channel post", logx.Field("channel", channel.ID), logx.Field("channel_name", channel.Title), logx.Field("post", post.Text))
 	var currentChannel *config.ChannelInfo
 	processMutex.Lock()
@@ -115,82 +128,108 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 			Keywords: []string{},
 		}
 		cfg.Channels = append(cfg.Channels, currentChannel)
+		//第一次添加，发送欢迎消息
+		tgBot.Send(tgbotapi.NewMessage(channel.ID, "欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明"))
 	}
 	if strings.TrimSpace(post.Text) == "" {
 		return
 	}
 	post.Text = strings.TrimSpace(post.Text)
 
-	if strings.HasPrefix(post.Text, "/add") {
-		words := strings.Split(post.Text, " ")
-		words = funk.FilterString(words, func(s string) bool {
-			return strings.TrimSpace(s) != ""
-		})
-		words = funk.UniqString(words)
-		if len(words) == 1 {
-			msg = tgbotapi.NewMessage(channel.ID, "请输入你要添加的关键字, 例如: /add keyword")
-			_, err := tgBot.Send(msg)
-			if err != nil {
-				log.Errorf("send message to channel failure: %v", err)
-			}
-			return
-		}
-		currentChannel.Keywords = append(currentChannel.Keywords, words[1:]...)
-
+	switch {
+	case strings.HasPrefix(post.Text, "/list"):
+		msg, err = processListEvent(cfg, channel)
+	case strings.HasPrefix(post.Text, "/add"):
+		msg, err = processAddEvent(cfg, post.Text, channel, currentChannel)
+	case strings.HasPrefix(post.Text, "/delete"):
+		msg, err = processDeleteEvent(cfg, post.Text, channel, currentChannel)
+	case strings.HasPrefix(post.Text, "/help"):
+		m := tgbotapi.NewMessage(channel.ID, help)
+		msg = &m
+	case strings.HasPrefix(post.Text, "/on"):
+		currentChannel.Status = "on"
 		cfg.Storage(app.ConfigFilePath)
-		msg = tgbotapi.NewMessage(channel.ID, "关键字添加成功 "+strings.Join(words[1:], " , "))
-	} else if strings.HasPrefix(post.Text, "/delete") {
-		words := strings.Split(post.Text, " ")
-		var keywords []string
-		var deletes []string
-		words = funk.FilterString(words, func(s string) bool {
-			return strings.TrimSpace(s) != ""
-		})
-		words = funk.UniqString(words)
-
-		if len(words) == 1 {
-			msg = tgbotapi.NewMessage(channel.ID, "请输入你要删除的关键字, 例如: /delete keyword")
-			_, err := tgBot.Send(msg)
-			if err != nil {
-				log.Errorf("send message to channel failure: %v", err)
-			}
-			return
-		}
-		words = words[1:]
-		for _, word := range words {
-			for _, v := range currentChannel.Keywords {
-				if strings.ToLower(v) == strings.ToLower(word) {
-					deletes = append(deletes, word)
-				} else {
-					keywords = append(keywords, v)
-				}
-			}
-		}
-		currentChannel.Keywords = keywords
-		deletes = funk.UniqString(deletes)
+		m := tgbotapi.NewMessage(channel.ID, "关键字通知已成功开启")
+		msg = &m
+	case strings.HasPrefix(post.Text, "/off"):
+		currentChannel.Status = "off"
 		cfg.Storage(app.ConfigFilePath)
-		msg = tgbotapi.NewMessage(channel.ID, "关键字删除成功 "+strings.Join(deletes, " , "))
-	} else if strings.HasPrefix(post.Text, "/list") {
-		var keywords []string
-		for _, info := range cfg.Channels {
-			if info.ChatId == channel.ID {
-				keywords = append(keywords, info.Keywords...)
-			}
-		}
-		keywords = funk.UniqString(keywords)
-		keywords = funk.FilterString(keywords, func(s string) bool {
-			return strings.TrimSpace(s) != ""
-		})
-		msg = tgbotapi.NewMessage(channel.ID, "当前关键字: "+strings.Join(keywords, " , "))
-	} else {
+		m := tgbotapi.NewMessage(channel.ID, "关键字通知已成功关闭")
+		msg = &m
+	default:
 		return
-		//msg = tgbotapi.NewMessage(channel.ID, "操作指南:\n/list 列出当前所有关键字\n /add {keyword1} {keyword2} ...... 增加新的关键字\n /delete {keyword1} {keyword2} ...... 删除关键字")
 	}
+
 	msg.ParseMode = tgbotapi.ModeMarkdown
-	_, err := tgBot.Send(msg)
+	if err != nil {
+		tgBot.Send(tgbotapi.NewMessage(channel.ID, err.Error()))
+		return
+	}
+
+	_, err = tgBot.Send(msg)
 	if err != nil {
 		log.Errorf("send message to channel failure: %v", err)
 	}
+}
+
+func processDeleteEvent(cfg *config.Config, postText string, channel *tgbotapi.Chat, currentChannel *config.ChannelInfo) (*tgbotapi.MessageConfig, error) {
+	words := strings.Split(postText, " ")
+	var keywords []string
+	var deletes []string
+	words = funk.FilterString(words, func(s string) bool {
+		return strings.TrimSpace(s) != ""
+	})
+	words = funk.UniqString(words)
+
+	if len(words) == 1 {
+		return nil, errors.New("请输入你要删除的关键字, 例如: /delete keyword")
+	}
+	words = words[1:]
+	for _, word := range words {
+		for _, v := range currentChannel.Keywords {
+			if strings.ToLower(v) == strings.ToLower(word) {
+				deletes = append(deletes, word)
+			} else {
+				keywords = append(keywords, v)
+			}
+		}
+	}
+	currentChannel.Keywords = keywords
+	deletes = funk.UniqString(deletes)
+	cfg.Storage(app.ConfigFilePath)
+	msg := tgbotapi.NewMessage(channel.ID, "关键字删除成功 "+strings.Join(deletes, " , "))
+	return &msg, nil
+}
+
+func processAddEvent(cfg *config.Config, postText string, channel *tgbotapi.Chat, currentChannel *config.ChannelInfo) (*tgbotapi.MessageConfig, error) {
+	words := strings.Split(postText, " ")
+	words = funk.FilterString(words, func(s string) bool {
+		return strings.TrimSpace(s) != ""
+	})
+	words = funk.UniqString(words)
+	if len(words) == 1 {
+		return nil, errors.New("请输入你要添加的关键字, 例如: /add keyword")
+	}
+	currentChannel.Keywords = append(currentChannel.Keywords, words[1:]...)
+
+	cfg.Storage(app.ConfigFilePath)
+	msg := tgbotapi.NewMessage(channel.ID, "关键字添加成功 "+strings.Join(words[1:], " , "))
+	return &msg, nil
+}
+
+func processListEvent(cfg *config.Config, channel *tgbotapi.Chat) (*tgbotapi.MessageConfig, error) {
+	var keywords []string
+	for _, info := range cfg.Channels {
+		if info.ChatId == channel.ID {
+			keywords = append(keywords, info.Keywords...)
+		}
+	}
+	keywords = funk.UniqString(keywords)
+	keywords = funk.FilterString(keywords, func(s string) bool {
+		return strings.TrimSpace(s) != ""
+	})
+	msg := tgbotapi.NewMessage(channel.ID, "当前关键字: "+strings.Join(keywords, " , "))
+	return &msg, nil
 }
 
 func TgBotInstance() *tgbotapi.BotAPI {

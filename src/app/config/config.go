@@ -11,15 +11,15 @@ type ChannelInfo struct {
 	Name     string   `yaml:"name"`
 	ChatId   int64    `yaml:"chatId"`
 	Keywords []string `yaml:"keywords"`
+	Status   string   `yaml:"status"`
 }
 
 type Config struct {
-	TgToken     string `yaml:"tgToken"`
-	TgChatId    int64  `yaml:"tgChatId"`
-	NsFeed      string `yaml:"nsFeed"`
-	AlterChatId int64  `yaml:"alterChatId"`
-	//Keywords    []string       `yaml:"keywords"`
-	Channels []*ChannelInfo `yaml:"channels"`
+	TgToken     string         `yaml:"tgToken"`
+	TgChatId    int64          `yaml:"tgChatId"`
+	NsFeed      string         `yaml:"nsFeed"`
+	AlterChatId int64          `yaml:"alterChatId"`
+	Channels    []*ChannelInfo `yaml:"channels"`
 }
 
 func (c *Config) Storage(path string) {
