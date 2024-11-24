@@ -1,0 +1,36 @@
+package config
+
+import (
+	"os"
+
+	"github.com/zeromicro/go-zero/core/logx"
+	"gopkg.in/yaml.v3"
+)
+
+type ChannelInfo struct {
+	Name     string   `yaml:"name"`
+	ChatId   int64    `yaml:"chatId"`
+	Keywords []string `yaml:"keywords"`
+}
+
+type Config struct {
+	TgToken     string `yaml:"tgToken"`
+	TgChatId    int64  `yaml:"tgChatId"`
+	NsFeed      string `yaml:"nsFeed"`
+	AlterChatId int64  `yaml:"alterChatId"`
+	//Keywords    []string       `yaml:"keywords"`
+	Channels []*ChannelInfo `yaml:"channels"`
+}
+
+func (c *Config) Storage(path string) {
+	b, e := yaml.Marshal(c)
+	if e != nil {
+		logx.Errorf("yaml.Marshal(c) error:%v", e)
+		return
+	}
+	err := os.WriteFile(path, b, 0644)
+	if err != nil {
+		logx.Errorf("os.WriteFile error:%v", err)
+		return
+	}
+}

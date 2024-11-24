@@ -1,0 +1,16 @@
+#机器人token
+tgToken:
+#机器人接收消息的chatId
+tgChatId:
+nsFeed: https://rss.nodeseek.com/
+#机器人启动&停止发送消息的chatId
+alterChatId:
+
+#频道配置，会自动添加
+channels:
+    - name: "test"
+      chatId: 9999
+      keywords:
+        - claw
+        - ggy
+        - pikpak
