@@ -2,6 +2,7 @@ package lib
 
 import (
 	"strings"
+	"sync"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	log "github.com/sirupsen/logrus"
@@ -91,12 +92,16 @@ func updates(cfg *config.Config) {
 	}
 }
 
+var processMutex sync.Mutex
+
 func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 	channel := update.ChannelPost.Chat
 	post := update.ChannelPost
 	var msg tgbotapi.MessageConfig
 	logx.Infow("receive channel post", logx.Field("channel", channel.ID), logx.Field("channel_name", channel.Title), logx.Field("post", post.Text))
 	var currentChannel *config.ChannelInfo
+	processMutex.Lock()
+	defer processMutex.Unlock()
 	for i, info := range cfg.Channels {
 		if info.ChatId == channel.ID {
 			currentChannel = cfg.Channels[i]
@@ -138,6 +143,12 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 		words := strings.Split(post.Text, " ")
 		var keywords []string
 		var deletes []string
+		words = words[1:]
+		words = funk.FilterString(words, func(s string) bool {
+			return strings.TrimSpace(s) != ""
+		})
+		words = funk.UniqString(words)
+
 		if len(words) == 1 {
 			msg = tgbotapi.NewMessage(channel.ID, "请输入你要删除的关键字, 例如: /delete keyword")
 			_, err := tgBot.Send(msg)
@@ -146,11 +157,7 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 			}
 			return
 		}
-		words = words[1:]
-		words = funk.FilterString(words, func(s string) bool {
-			return strings.TrimSpace(s) != ""
-		})
-		words = funk.UniqString(words)
+
 		for _, word := range words {
 			for _, v := range currentChannel.Keywords {
 				if strings.ToLower(v) == strings.ToLower(word) {
@@ -161,6 +168,7 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 			}
 		}
 		currentChannel.Keywords = keywords
+		deletes = funk.UniqString(deletes)
 		cfg.Storage(app.ConfigFilePath)
 		msg = tgbotapi.NewMessage(channel.ID, "关键字删除成功 "+strings.Join(deletes, " , "))
 	} else if strings.HasPrefix(post.Text, "/list") {
