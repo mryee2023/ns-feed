@@ -9,6 +9,7 @@ require (
 	github.com/mmcdole/gofeed v1.3.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cast v1.7.0
+	github.com/thoas/go-funk v0.9.3
 	github.com/zeromicro/go-zero v1.7.3
 	gopkg.in/yaml.v3 v3.0.1
 )

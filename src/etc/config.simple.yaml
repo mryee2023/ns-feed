@@ -1,16 +1,139 @@
-#机器人token
-tgToken:
-#机器人接收消息的chatId
-tgChatId:
+tgToken: 7727116717:AAH31RbD5ygRkuWGO1EaCcfKybAoirykxaY
+tgChatId: 0
 nsFeed: https://rss.nodeseek.com/
-#机器人启动&停止发送消息的chatId
-alterChatId:
-
-#频道配置，会自动添加
+alterChatId: 0
 channels:
-    - name: "test"
+    - name: test
       chatId: 9999
       keywords:
         - claw
         - ggy
         - pikpak
+    - name: "NS通知\U0001F4E2"
+      chatId: -1002354873512
+      keywords:
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - bage
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - ggy
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - mk
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - bgp.gd
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+        - push
+    - name: 我的测试频道
+      chatId: -1002275646452
+      keywords:
+        - bage
+        - test

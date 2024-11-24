@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/matoous/go-nanoid/v2"
@@ -91,11 +92,14 @@ func hasKeyword(title string, keywords []string) bool {
 
 }
 
+var mutex sync.Mutex
+
 func (f *NsFeed) postToChannel(c *config.ChannelInfo, feed *gofeed.Feed) {
 	if len(c.Keywords) == 0 {
 		return
 	}
-
+	mutex.Lock()
+	defer mutex.Unlock()
 	var his map[string]struct{}
 	his, ok := history[c.ChatId]
 	if !ok {
@@ -108,10 +112,10 @@ func (f *NsFeed) postToChannel(c *config.ChannelInfo, feed *gofeed.Feed) {
 			history[c.ChatId][item.Link] = struct{}{}
 			if f.bot != nil {
 				msg := NotifyMessage{
-					Text: fmt.Sprintf("📢 *%s*\n\n🕐 %s\n\n👉 [%s](%s)",
+					Text: fmt.Sprintf("📢 *%s*\n\n🕐 %s\n\n👉 %s",
 						item.Title,
 						item.PublishedParsed.Add(time.Hour*8).Format("2006-01-02 15:04:05"),
-						item.Link, item.Link),
+						item.Link),
 					ChatId: &c.ChatId,
 				}
 				f.Add(msg)

@@ -4,12 +4,12 @@ import (
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	log "github.com/sirupsen/logrus"
+	"github.com/thoas/go-funk"
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/rescue"
 	"ns-rss/src/app"
 	"ns-rss/src/app/config"
-
-	log "github.com/sirupsen/logrus"
 )
 
 var tgBot *tgbotapi.BotAPI
@@ -111,9 +111,17 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 		}
 		cfg.Channels = append(cfg.Channels, currentChannel)
 	}
+	if strings.TrimSpace(post.Text) == "" {
+		return
+	}
+	post.Text = strings.TrimSpace(post.Text)
 
 	if strings.HasPrefix(post.Text, "/add") {
 		words := strings.Split(post.Text, " ")
+		words = funk.FilterString(words, func(s string) bool {
+			return strings.TrimSpace(s) != ""
+		})
+		words = funk.UniqString(words)
 		if len(words) == 1 {
 			msg = tgbotapi.NewMessage(channel.ID, "请输入你要添加的关键字, 例如: /add keyword")
 			_, err := tgBot.Send(msg)
@@ -123,6 +131,7 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 			return
 		}
 		currentChannel.Keywords = append(currentChannel.Keywords, words[1:]...)
+
 		cfg.Storage(app.ConfigFilePath)
 		msg = tgbotapi.NewMessage(channel.ID, "关键字添加成功 "+strings.Join(words[1:], " , "))
 	} else if strings.HasPrefix(post.Text, "/delete") {
@@ -138,8 +147,12 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 			return
 		}
 		words = words[1:]
-		for _, v := range currentChannel.Keywords {
-			for _, word := range words {
+		words = funk.FilterString(words, func(s string) bool {
+			return strings.TrimSpace(s) != ""
+		})
+		words = funk.UniqString(words)
+		for _, word := range words {
+			for _, v := range currentChannel.Keywords {
 				if strings.ToLower(v) == strings.ToLower(word) {
 					deletes = append(deletes, word)
 				} else {
@@ -157,9 +170,14 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 				keywords = append(keywords, info.Keywords...)
 			}
 		}
+		keywords = funk.UniqString(keywords)
+		keywords = funk.FilterString(keywords, func(s string) bool {
+			return strings.TrimSpace(s) != ""
+		})
 		msg = tgbotapi.NewMessage(channel.ID, "当前关键字: "+strings.Join(keywords, " , "))
 	} else {
-		msg = tgbotapi.NewMessage(channel.ID, "操作指南:\n/list 列出当前所有关键字\n /add {keyword1} {keyword2} ...... 增加新的关键字\n /delete {keyword1} {keyword2} ...... 删除关键字")
+		return
+		//msg = tgbotapi.NewMessage(channel.ID, "操作指南:\n/list 列出当前所有关键字\n /add {keyword1} {keyword2} ...... 增加新的关键字\n /delete {keyword1} {keyword2} ...... 删除关键字")
 	}
 	msg.ParseMode = tgbotapi.ModeMarkdown
 	_, err := tgBot.Send(msg)

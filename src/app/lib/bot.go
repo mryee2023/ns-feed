@@ -1,11 +1,12 @@
 package lib
 
 import (
+	"context"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cast"
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/rescue"
 )
 
@@ -33,8 +34,8 @@ func NewTelegramNotifier(botToken string, chatId string) *TelegramNotifier {
 var Replacer = strings.NewReplacer("_", "\\_",
 	//"[", "\\[",
 	//"]", "\\]",
-	//"(", "\\(",
-	//")", "\\)",
+	"(", "\\(",
+	")", "\\)",
 	//"`", "\\`",
 	//">", "\\>",
 	"#", "\\#",
@@ -61,11 +62,14 @@ func (t *TelegramNotifier) Notify(msg NotifyMessage) {
 	if msg.ChatId != nil {
 		tgMsg.ChatID = *msg.ChatId
 	}
+	logx.ContextWithFields(context.Background(), logx.Field("msg", tgMsg.Text), logx.Field("chatId", tgMsg.ChatID))
 	tgMsg.ParseMode = tgbotapi.ModeMarkdownV2
-	tgMsg.DisableWebPagePreview = true
+	tgMsg.DisableWebPagePreview = false
 	_, e := tg.Send(tgMsg)
 	if e != nil {
-		log.WithField("error", e).Error("send telegram message error")
+		logx.Errorw("send telegram message error", logx.Field("error", e))
+	} else {
+		logx.Infow("send telegram message")
 	}
 
 }
