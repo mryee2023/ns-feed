@@ -67,7 +67,7 @@ func (f *NsFeed) Start() {
 		defer func() {
 			rescue.Recover()
 		}()
-		tk := time.NewTicker(30 * time.Second)
+		tk := time.NewTicker(10 * time.Second)
 		defer tk.Stop()
 		for {
 			select {

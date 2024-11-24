@@ -125,8 +125,7 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 		currentChannel.Keywords = append(currentChannel.Keywords, words[1:]...)
 		cfg.Storage(app.ConfigFilePath)
 		msg = tgbotapi.NewMessage(channel.ID, "关键字添加成功 "+strings.Join(words[1:], " , "))
-	}
-	if strings.HasPrefix(post.Text, "/delete") {
+	} else if strings.HasPrefix(post.Text, "/delete") {
 		words := strings.Split(post.Text, " ")
 		var keywords []string
 		var deletes []string
@@ -151,8 +150,7 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 		currentChannel.Keywords = keywords
 		cfg.Storage(app.ConfigFilePath)
 		msg = tgbotapi.NewMessage(channel.ID, "关键字删除成功 "+strings.Join(deletes, " , "))
-	}
-	if strings.HasPrefix(post.Text, "/list") {
+	} else if strings.HasPrefix(post.Text, "/list") {
 		var keywords []string
 		for _, info := range cfg.Channels {
 			if info.ChatId == channel.ID {
@@ -160,6 +158,8 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 			}
 		}
 		msg = tgbotapi.NewMessage(channel.ID, "当前关键字: "+strings.Join(keywords, " , "))
+	} else {
+		msg = tgbotapi.NewMessage(channel.ID, "操作指南:\n/list 列出当前所有关键字\n /add {keyword1} {keyword2} ...... 增加新的关键字\n /delete {keyword1} {keyword2} ...... 删除关键字")
 	}
 	msg.ParseMode = tgbotapi.ModeMarkdown
 	_, err := tgBot.Send(msg)
