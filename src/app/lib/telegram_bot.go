@@ -143,7 +143,6 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 		words := strings.Split(post.Text, " ")
 		var keywords []string
 		var deletes []string
-		words = words[1:]
 		words = funk.FilterString(words, func(s string) bool {
 			return strings.TrimSpace(s) != ""
 		})
@@ -157,7 +156,7 @@ func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 			}
 			return
 		}
-
+		words = words[1:]
 		for _, word := range words {
 			for _, v := range currentChannel.Keywords {
 				if strings.ToLower(v) == strings.ToLower(word) {
