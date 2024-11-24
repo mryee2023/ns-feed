@@ -24,6 +24,9 @@ var help = `
 /on 开启关键字通知
 
 /off 关闭关键字通知
+
+任何使用上的帮助或建议可以联系大管家 @hello_cello_bot
+
 `
 var tgBot *tgbotapi.BotAPI
 
