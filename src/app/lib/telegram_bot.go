@@ -59,11 +59,15 @@ func updates(cfg *config.Config) {
 var processMutex sync.Mutex
 
 func processMessage(cfg *config.Config, update tgbotapi.Update) {
+	defer func() {
+		rescue.Recover()
+	}()
 	message := update.Message
-
+	if message == nil {
+		return
+	}
 	entry := log.WithField("message", message.Text).
-		WithField("from", message.From.UserName).
-		WithField("uid", message.From.ID)
+		WithField("from", message)
 	entry.Info("receive message")
 	var chatType = config.ChatTypeChat
 	//判断来源类型

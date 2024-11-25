@@ -7,5 +7,5 @@ channels:
       chatId: 415257783
       keywords:
         - pqs
-      status: "on"
+      status: "off"
       type: chat
