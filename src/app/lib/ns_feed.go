@@ -84,6 +84,7 @@ func (f *NsFeed) Start() {
 
 func hasKeyword(title string, keywords []string) bool {
 	for _, keyword := range keywords {
+		keyword = strings.Trim(keyword, "{}")
 		if strings.Contains(strings.ToLower(title), strings.ToLower(keyword)) {
 			return true
 		}
@@ -125,7 +126,7 @@ func (f *NsFeed) postToChannel(c *config.ChannelInfo, feed *gofeed.Feed) {
 }
 
 func (f *NsFeed) fetchRss() {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	fp := gofeed.NewParser()
 	feed, err := fp.ParseURLWithContext(f.svc.Config.NsFeed, ctx)
