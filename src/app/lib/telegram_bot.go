@@ -234,6 +234,11 @@ func processAddEvent(cfg *config.Config, postText string, currentChannel *config
 	if len(words) == 1 {
 		return nil, errors.New("请输入你要添加的关键字, 例如: /add keyword")
 	}
+	words = funk.Map(words, func(s string) string {
+		v := strings.TrimSpace(s)
+		v = strings.Trim(v, "{}")
+		return v
+	}).([]string)
 	currentChannel.Keywords = append(currentChannel.Keywords, words[1:]...)
 
 	cfg.Storage(app.ConfigFilePath)
