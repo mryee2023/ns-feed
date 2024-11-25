@@ -24,6 +24,8 @@ var help = `
 
 /off 关闭关键字通知
 
+/quit 退出关键字通知
+
 任何使用上的帮助或建议可以联系大管家 @hello\_cello\_bot
 
 `
@@ -62,20 +64,36 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 	defer func() {
 		rescue.Recover()
 	}()
-	message := update.Message
-	if message == nil {
-		return
-	}
-	entry := log.WithField("message", message.Text).
-		WithField("from", message)
-	entry.Info("receive message")
+	var name string
+	var chatId int64
+	var text string
 	var chatType = config.ChatTypeChat
 	//判断来源类型
-	if message.Chat.IsChannel() {
+	if update.ChannelPost != nil {
 		chatType = config.ChatTypeChannel
-	} else if message.Chat.IsGroup() {
+		name = update.ChannelPost.Chat.Title
+		chatId = update.ChannelPost.Chat.ID
+		text = update.ChannelPost.Text
+	} else if update.Message != nil && update.Message.Chat.IsGroup() {
 		chatType = config.ChatTypeGroup
+		name = update.Message.Chat.Title
+		chatId = update.Message.Chat.ID
+		text = update.Message.Text
+	} else if update.Message != nil {
+		chatType = config.ChatTypeChat
+		name = update.Message.Chat.Title
+		chatId = update.Message.Chat.ID
+		text = update.Message.Text
 	}
+
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+
+	entry := log.WithField("message", text).
+		WithField("from", name)
+	entry.Info("receive message")
 
 	processMutex.Lock()
 	defer processMutex.Unlock()
@@ -86,25 +104,25 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 		if strings.TrimSpace(info.Type) == "" {
 			info.Type = config.ChatTypeChannel
 		}
-		if info.ChatId == message.From.ID && info.Type == chatType {
+		if info.ChatId == chatId && info.Type == chatType {
 			currentChannel = cfg.Channels[i]
 			break
 		}
 	}
 	if currentChannel == nil {
 		currentChannel = &config.ChannelInfo{
-			Name:     message.From.UserName,
-			ChatId:   message.From.ID,
+			Name:     name,
+			ChatId:   chatId,
 			Keywords: []string{},
 			Type:     chatType,
 		}
 		cfg.Channels = append(cfg.Channels, currentChannel)
 		cfg.Storage(app.ConfigFilePath)
 		//第一次添加，发送欢迎消息
-		tgBot.Send(tgbotapi.NewMessage(message.Chat.ID, "欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明"))
+		tgBot.Send(tgbotapi.NewMessage(chatId, "欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明"))
 	}
 
-	text := update.Message.Text
+	//text := update.Message.Text
 
 	//处理命令
 	if strings.TrimSpace(text) == "" {
@@ -133,16 +151,26 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 		cfg.Storage(app.ConfigFilePath)
 		m := tgbotapi.NewMessage(currentChannel.ChatId, "关键字通知已成功关闭")
 		msg = &m
+	case strings.HasPrefix(text, "/quit"):
+		var channels []*config.ChannelInfo
+		for i, info := range cfg.Channels {
+			if info.ChatId != chatId {
+				channels = append(channels, cfg.Channels[i])
+			}
+		}
+		cfg.Channels = channels
+		cfg.Storage(app.ConfigFilePath)
+		m := tgbotapi.NewMessage(currentChannel.ChatId, "Bye~您现在可以移除本机器人了\n期待您的再次使用")
+		msg = &m
 	default:
 		return
 	}
 
-	msg.ParseMode = tgbotapi.ModeMarkdown
 	if err != nil {
 		tgBot.Send(tgbotapi.NewMessage(currentChannel.ChatId, err.Error()))
 		return
 	}
-
+	msg.ParseMode = tgbotapi.ModeMarkdown
 	result, err := tgBot.Send(msg)
 	log.WithField("msg", msg.Text)
 	if err != nil {

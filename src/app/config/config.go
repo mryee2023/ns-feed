@@ -24,6 +24,7 @@ type ChannelInfo struct {
 }
 
 type Config struct {
+	Port        string         `yaml:"port"`
 	TgToken     string         `yaml:"tgToken"`
 	TgChatId    int64          `yaml:"tgChatId"`
 	NsFeed      string         `yaml:"nsFeed"`

@@ -1,3 +1,4 @@
+port: :8080
 tgToken: 7727116717:AAH31RbD5ygRkuWGO1EaCcfKybAoirykxaY
 tgChatId: 0
 nsFeed: https://rss.nodeseek.com/
@@ -9,3 +10,9 @@ channels:
         - pqs
       status: "off"
       type: chat
+    - name: 我的测试频道
+      chatId: -1002275646452
+      keywords:
+        - 你好
+      status: "off"
+      type: channel
