@@ -3,20 +3,9 @@ tgChatId: 0
 nsFeed: https://rss.nodeseek.com/
 alterChatId: 0
 channels:
-#    - name: test
-#      chatId: 9999
-#      keywords:
-#        - claw
-#        - ggy
-#        - pikpak
-#      status: ""
-#    - name: "NS通知\U0001F4E2"
-#      chatId: -1002354873512
-#      keywords: []
-#      status: ""
-#    - name: 我的测试频道
-#      chatId: -1002275646452
-#      keywords:
-#        - mk
-#        - bgp.gd
-#      status: "on"
+    - name: hellomryee
+      chatId: 415257783
+      keywords:
+        - pqs
+      status: "on"
+      type: chat
