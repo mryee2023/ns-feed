@@ -12,6 +12,7 @@ type ChannelInfo struct {
 	ChatId   int64    `yaml:"chatId"`
 	Keywords []string `yaml:"keywords"`
 	Status   string   `yaml:"status"`
+	Type     string   `yaml:"type"` //channel, group, private
 }
 
 type Config struct {

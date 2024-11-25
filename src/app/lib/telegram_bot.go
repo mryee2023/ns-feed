@@ -2,6 +2,7 @@ package lib
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -65,7 +66,7 @@ func updates(cfg *config.Config) {
 		if !update.Message.IsCommand() {
 			continue
 		}
-
+		processMessage(cfg, update)
 		//var msg tgbotapi.MessageConfig
 		//switch update.Message.Command() {
 		//case "list":
@@ -108,6 +109,35 @@ func updates(cfg *config.Config) {
 }
 
 var processMutex sync.Mutex
+
+func processMessage(cfg *config.Config, update tgbotapi.Update) {
+	message := update.Message
+	fmt.Println(message.Text)
+	fmt.Printf("sender name %s, uid %d", message.From.UserName, message.From.ID)
+
+	processMutex.Lock()
+	defer processMutex.Unlock()
+	//判断个人是否在配置文件中
+	var currentChannel *config.ChannelInfo
+	for i, info := range cfg.Channels {
+		if info.ChatId == message.From.ID && info.Type == "private" {
+			currentChannel = cfg.Channels[i]
+			break
+		}
+	}
+	if currentChannel == nil {
+		currentChannel = &config.ChannelInfo{
+			Name:     message.From.UserName,
+			ChatId:   message.From.ID,
+			Keywords: []string{},
+			Type:     "private",
+		}
+		cfg.Channels = append(cfg.Channels, currentChannel)
+		//第一次添加，发送欢迎消息
+		tgBot.Send(tgbotapi.NewMessage(message.Chat.ID, "欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明"))
+	}
+
+}
 
 func processChannelPost(cfg *config.Config, update tgbotapi.Update) {
 	channel := update.ChannelPost.Chat
