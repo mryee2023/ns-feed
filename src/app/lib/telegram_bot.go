@@ -16,9 +16,9 @@ import (
 var help = `
 /list 列出当前所有关键字
 
-/add {keyword} 增加新的关键字
+/add 关键字1 关键字2 关键字3.... 增加新的关键字
 
-/delete {keyword} 删除关键字
+/delete 关键字1 关键字2 关键字3.... 删除关键字
 
 /on 开启关键字通知
 
