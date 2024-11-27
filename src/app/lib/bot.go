@@ -10,8 +10,9 @@ import (
 )
 
 type NotifyMessage struct {
-	Text   string
-	ChatId *int64
+	Text    string
+	ChatId  *int64
+	MsgType string //chat, group, channel
 }
 
 type BotNotifier interface {

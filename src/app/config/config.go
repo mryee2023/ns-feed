@@ -7,14 +7,24 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var ChatType string
+
+const (
+	ChatTypeChat    = "chat"
+	ChatTypeGroup   = "group"
+	ChatTypeChannel = "channel"
+)
+
 type ChannelInfo struct {
 	Name     string   `yaml:"name"`
 	ChatId   int64    `yaml:"chatId"`
 	Keywords []string `yaml:"keywords"`
 	Status   string   `yaml:"status"`
+	Type     string   `yaml:"type"` //channel, group, chat
 }
 
 type Config struct {
+	Port        string         `yaml:"port"`
 	TgToken     string         `yaml:"tgToken"`
 	TgChatId    int64          `yaml:"tgChatId"`
 	NsFeed      string         `yaml:"nsFeed"`

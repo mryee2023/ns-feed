@@ -5,8 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "net/http/pprof"
 
@@ -100,6 +102,24 @@ func main() {
 		feeder.SetBot(bot)
 		feeder.Start()
 	}()
+	var port = ":8080"
+	if config.Port != "" {
+		port = config.Port
+	}
+
+	// 定义路由
+	http.HandleFunc("/ping", func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		var rtn = make(map[string]interface{})
+		rtn["code"] = 1000
+		rtn["msg"] = time.Now().Format("2006-01-02 15:04:05")
+		_, _ = writer.Write([]byte(`{"code":1000,"msg":"pong"}`))
+	})
+	log.Infof("Service start success,Listen On " + port)
+	if err := http.ListenAndServe(port, nil); err != nil {
+		log.Fatalf("start web server failure : %v", err)
+	}
+	//开启web服务
 
 	select {}
 
