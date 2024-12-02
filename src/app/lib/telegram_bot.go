@@ -199,9 +199,9 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 			ip = "未知"
 		} else {
 			mask := strings.Split(ip, ".")
-			ip = mask[0] + ".*." + mask[2] + "." + mask[3]
+			ip = mask[0] + ".\\*." + mask[2] + "." + mask[3]
 		}
-		var message = fmt.Sprintf("📊当前状态: \n🔔订阅数: %d \nℹ️当天发送: %d \n🌎当前IP: %s", subscribers, todaySend, ip)
+		var message = fmt.Sprintf("当前状态: \n订阅数: %d \n当天发送: %d \n当前IP: %s", subscribers, todaySend, ip)
 		m := tgbotapi.NewMessage(currentChannel.ChatId, message)
 		msg = &m
 	default:
