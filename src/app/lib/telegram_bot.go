@@ -1,11 +1,16 @@
 package lib
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/golang-module/carbon/v2"
 	log "github.com/sirupsen/logrus"
 	"github.com/thoas/go-funk"
 	"github.com/zeromicro/go-zero/core/rescue"
@@ -59,6 +64,22 @@ func updates(cfg *config.Config) {
 }
 
 var processMutex sync.Mutex
+
+func curl() string {
+	// 准备命令
+	cmd := exec.Command("curl", "ip.sb", "-4")
+
+	// 捕获输出
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	// 执行命令
+	err := cmd.Run()
+	if err != nil {
+		return ""
+	}
+	return out.String()
+}
 
 func processMessage(cfg *config.Config, update tgbotapi.Update) {
 	defer func() {
@@ -161,6 +182,21 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 		cfg.Channels = channels
 		cfg.Storage(app.ConfigFilePath)
 		m := tgbotapi.NewMessage(currentChannel.ChatId, "Bye~您现在可以移除本机器人了\n期待您的再次使用")
+		msg = &m
+	case strings.HasPrefix(text, "/status") && currentChannel.ChatId == cfg.AlterChatId:
+		//汇总当前状态
+		subscribers := len(cfg.Channels)
+		//当天发送次数
+		notifyLock.Lock()
+		defer notifyLock.Unlock()
+		todaySend := int64(0)
+		k := time.Now().Format(carbon.DateFormat)
+		if v, ok := noticeHistory[k]; ok {
+			todaySend = v
+		}
+		var ip = curl()
+		var message = fmt.Sprintf("📊当前状态: \n🔔订阅数: %d \n ℹ️当天发送: %d \n 🌎当前IP: %s", subscribers, todaySend, ip)
+		m := tgbotapi.NewMessage(currentChannel.ChatId, message)
 		msg = &m
 	default:
 		return
