@@ -140,7 +140,7 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 		cfg.Subscribes = append(cfg.Subscribes, currentChannel)
 		cfg.Storage(app.ConfigFilePath)
 		//第一次添加，发送欢迎消息
-		tgBot.Send(tgbotapi.NewMessage(chatId, `欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明。\n任何使用上的帮助或建议可以联系大管家 @hello\_cello\_bot`))
+		tgBot.Send(tgbotapi.NewMessage(chatId, `欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明。`))
 	}
 
 	//处理命令

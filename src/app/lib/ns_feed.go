@@ -68,6 +68,9 @@ func (f *NsFeed) Start() {
 		f.logger.Errorw("parse duration failed", logx.Field("err", e), logx.Field("FetchTimeInterval", f.svc.Config.FetchTimeInterval))
 		ds = 10 * time.Second
 	}
+	if ds < 10*time.Second {
+		ds = 10 * time.Second
+	}
 	go func() {
 		defer func() {
 			rescue.Recover()
