@@ -42,7 +42,7 @@ tgToken: your_telegram_bot_token # 机器人Token
 nsFeed: https://rss.nodeseek.com
 adminId: 0 # 管理员ID,系统启动/退出时会发送通知，执行/status命令时可发送汇总数据
 fetchTimeInterval: 10s   # RSS抓取时间间隔,最小10s
-subscribes: # 订阅列表
+subscribes: # 订阅列表，这里无需配置，系统会自动添加
   - name: test  # 订阅名称
     chatId: -989876 # 频道ID或个人ID
     keywords: # 关键字列表
