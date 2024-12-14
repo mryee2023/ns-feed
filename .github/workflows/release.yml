@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*' # 触发条件：推送以 v 开头的tag
 
+permissions:
+  contents: write # 添加写入权限
+
 env:
   APP_NAME: ns-feed-bot
   DOCKER_REPO: ${{ secrets.DOCKER_USERNAME }}
