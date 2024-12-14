@@ -15,7 +15,7 @@ const (
 	ChatTypeChannel = "channel"
 )
 
-type ChannelInfo struct {
+type Subscribe struct {
 	Name     string   `yaml:"name"`
 	ChatId   int64    `yaml:"chatId"`
 	Keywords []string `yaml:"keywords"`
@@ -24,12 +24,12 @@ type ChannelInfo struct {
 }
 
 type Config struct {
-	Port        string         `yaml:"port"`
-	TgToken     string         `yaml:"tgToken"`
-	TgChatId    int64          `yaml:"tgChatId"`
-	NsFeed      string         `yaml:"nsFeed"`
-	AlterChatId int64          `yaml:"alterChatId"`
-	Channels    []*ChannelInfo `yaml:"channels"`
+	Port              string       `yaml:"port"`
+	TgToken           string       `yaml:"tgToken"`
+	NsFeed            string       `yaml:"nsFeed"`
+	AdminId           int64        `yaml:"adminId"`
+	FetchTimeInterval string       `yaml:"fetchTimeInterval"` //抓取rss时间间隔
+	Subscribes        []*Subscribe `yaml:"subscribes"`
 }
 
 func (c *Config) Storage(path string) {

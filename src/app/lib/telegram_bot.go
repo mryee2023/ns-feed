@@ -119,31 +119,29 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 	processMutex.Lock()
 	defer processMutex.Unlock()
 	//判断个人是否在配置文件中
-	var currentChannel *config.ChannelInfo
-	for i, info := range cfg.Channels {
+	var currentChannel *config.Subscribe
+	for i, info := range cfg.Subscribes {
 		//兼容原数据
 		if strings.TrimSpace(info.Type) == "" {
 			info.Type = config.ChatTypeChannel
 		}
 		if info.ChatId == chatId && info.Type == chatType {
-			currentChannel = cfg.Channels[i]
+			currentChannel = cfg.Subscribes[i]
 			break
 		}
 	}
 	if currentChannel == nil {
-		currentChannel = &config.ChannelInfo{
+		currentChannel = &config.Subscribe{
 			Name:     name,
 			ChatId:   chatId,
 			Keywords: []string{},
 			Type:     chatType,
 		}
-		cfg.Channels = append(cfg.Channels, currentChannel)
+		cfg.Subscribes = append(cfg.Subscribes, currentChannel)
 		cfg.Storage(app.ConfigFilePath)
 		//第一次添加，发送欢迎消息
-		tgBot.Send(tgbotapi.NewMessage(chatId, "欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明"))
+		tgBot.Send(tgbotapi.NewMessage(chatId, `欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明。\n任何使用上的帮助或建议可以联系大管家 @hello\_cello\_bot`))
 	}
-
-	//text := update.Message.Text
 
 	//处理命令
 	if strings.TrimSpace(text) == "" {
@@ -173,19 +171,19 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 		m := tgbotapi.NewMessage(currentChannel.ChatId, "关键字通知已成功关闭")
 		msg = &m
 	case strings.HasPrefix(text, "/quit"):
-		var channels []*config.ChannelInfo
-		for i, info := range cfg.Channels {
+		var channels []*config.Subscribe
+		for i, info := range cfg.Subscribes {
 			if info.ChatId != chatId {
-				channels = append(channels, cfg.Channels[i])
+				channels = append(channels, cfg.Subscribes[i])
 			}
 		}
-		cfg.Channels = channels
+		cfg.Subscribes = channels
 		cfg.Storage(app.ConfigFilePath)
 		m := tgbotapi.NewMessage(currentChannel.ChatId, "Bye~您现在可以移除本机器人了\n期待您的再次使用")
 		msg = &m
-	case strings.HasPrefix(text, "/status") && currentChannel.ChatId == cfg.AlterChatId:
+	case strings.HasPrefix(text, "/status") && currentChannel.ChatId == cfg.AdminId:
 		//汇总当前状态
-		subscribers := len(cfg.Channels)
+		subscribers := len(cfg.Subscribes)
 		//当天发送次数
 		notifyLock.Lock()
 		defer notifyLock.Unlock()
@@ -226,7 +224,7 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 	}
 }
 
-func processDeleteEvent(cfg *config.Config, postText string, currentChannel *config.ChannelInfo) (*tgbotapi.MessageConfig, error) {
+func processDeleteEvent(cfg *config.Config, postText string, currentChannel *config.Subscribe) (*tgbotapi.MessageConfig, error) {
 	words := strings.Split(postText, " ")
 	var deletes = make(map[string]struct{})
 	var delWords []string
@@ -267,7 +265,7 @@ func processDeleteEvent(cfg *config.Config, postText string, currentChannel *con
 	return &msg, nil
 }
 
-func processAddEvent(cfg *config.Config, postText string, currentChannel *config.ChannelInfo) (*tgbotapi.MessageConfig, error) {
+func processAddEvent(cfg *config.Config, postText string, currentChannel *config.Subscribe) (*tgbotapi.MessageConfig, error) {
 	words := strings.Split(postText, " ")
 	words = funk.FilterString(words, func(s string) bool {
 		return strings.TrimSpace(s) != ""
@@ -288,9 +286,9 @@ func processAddEvent(cfg *config.Config, postText string, currentChannel *config
 	return &msg, nil
 }
 
-func processListEvent(cfg *config.Config, channel *config.ChannelInfo) (*tgbotapi.MessageConfig, error) {
+func processListEvent(cfg *config.Config, channel *config.Subscribe) (*tgbotapi.MessageConfig, error) {
 	var keywords []string
-	for _, info := range cfg.Channels {
+	for _, info := range cfg.Subscribes {
 		if info.ChatId == channel.ChatId {
 			keywords = append(keywords, info.Keywords...)
 		}
