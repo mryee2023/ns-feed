@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"sync"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -14,33 +13,61 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/thoas/go-funk"
 	"github.com/zeromicro/go-zero/core/rescue"
-	"ns-rss/src/app"
 	"ns-rss/src/app/config"
+	"ns-rss/src/app/db"
 )
 
-var help = `
+const (
+	cmdHelp   = "/help"
+	cmdList   = "/list"
+	cmdAdd    = "/add"
+	cmdDelete = "/delete"
+	cmdOn     = "/on"
+	cmdOff    = "/off"
+	cmdQuit   = "/quit"
+	cmdStatus = "/status"
+)
+
+var helpText = `
 /list 列出当前所有关键字
-
 /add 关键字1 关键字2 关键字3.... 增加新的关键字
-
 /delete 关键字1 关键字2 关键字3.... 删除关键字
-
 /on 开启关键字通知
-
 /off 关闭关键字通知
-
 /quit 退出关键字通知
 
 任何使用上的帮助或建议可以联系大管家 @hello\_cello\_bot
-
 `
-var tgBot *tgbotapi.BotAPI
+
+var (
+	tgBot *tgbotapi.BotAPI
+)
+
+// ChatInfo 存储聊天相关信息
+type ChatInfo struct {
+	Name     string
+	ChatID   int64
+	ChatType string
+	Text     string
+}
+
+// CommandHandler 命令处理函数类型
+type CommandHandler func(*db.Subscribe, []string) (*tgbotapi.MessageConfig, error)
+
+// 命令处理器映射
+var commandHandlers = map[string]CommandHandler{
+	cmdList:   handleList,
+	cmdAdd:    handleAdd,
+	cmdDelete: handleDelete,
+	cmdHelp:   handleHelp,
+	cmdOn:     handleOn,
+	cmdOff:    handleOff,
+	cmdQuit:   handleQuit,
+}
 
 func InitTgBotListen(cnf *config.Config) {
+	defer rescue.Recover()
 
-	defer func() {
-		rescue.Recover()
-	}()
 	var err error
 	tgBot, err = tgbotapi.NewBotAPI(cnf.TgToken)
 	if err != nil {
@@ -49,9 +76,7 @@ func InitTgBotListen(cnf *config.Config) {
 	tgBot.Debug = false
 
 	log.Infof("Authorized on account %s", tgBot.Self.UserName)
-
 	go updates(cnf)
-
 }
 
 func updates(cfg *config.Config) {
@@ -63,160 +88,122 @@ func updates(cfg *config.Config) {
 	}
 }
 
-var processMutex sync.Mutex
-
-func curl() string {
-	// 准备命令
-	cmd := exec.Command("curl", "ip.sb", "-4")
-
-	// 捕获输出
-	var out bytes.Buffer
-	cmd.Stdout = &out
-
-	// 执行命令
-	err := cmd.Run()
-	if err != nil {
-		return ""
+// extractChatInfo 从更新中提取聊天信息
+func extractChatInfo(update tgbotapi.Update) *ChatInfo {
+	switch {
+	case update.ChannelPost != nil:
+		return &ChatInfo{
+			Name:     update.ChannelPost.Chat.Title,
+			ChatID:   update.ChannelPost.Chat.ID,
+			ChatType: config.ChatTypeChannel,
+			Text:     strings.TrimSpace(update.ChannelPost.Text),
+		}
+	case update.Message != nil && update.Message.Chat.IsGroup():
+		return &ChatInfo{
+			Name:     update.Message.Chat.Title,
+			ChatID:   update.Message.Chat.ID,
+			ChatType: config.ChatTypeGroup,
+			Text:     strings.TrimSpace(update.Message.Text),
+		}
+	case update.Message != nil:
+		return &ChatInfo{
+			Name:     update.Message.Chat.Title,
+			ChatID:   update.Message.Chat.ID,
+			ChatType: config.ChatTypeChat,
+			Text:     strings.TrimSpace(update.Message.Text),
+		}
+	default:
+		return nil
 	}
-	return out.String()
 }
 
 func processMessage(cfg *config.Config, update tgbotapi.Update) {
-	defer func() {
-		rescue.Recover()
-	}()
-	var name string
-	var chatId int64
-	var text string
-	var chatType = config.ChatTypeChat
-	//判断来源类型
-	if update.ChannelPost != nil {
-		chatType = config.ChatTypeChannel
-		name = update.ChannelPost.Chat.Title
-		chatId = update.ChannelPost.Chat.ID
-		text = update.ChannelPost.Text
-	} else if update.Message != nil && update.Message.Chat.IsGroup() {
-		chatType = config.ChatTypeGroup
-		name = update.Message.Chat.Title
-		chatId = update.Message.Chat.ID
-		text = update.Message.Text
-	} else if update.Message != nil {
-		chatType = config.ChatTypeChat
-		name = update.Message.Chat.Title
-		chatId = update.Message.Chat.ID
-		text = update.Message.Text
-	}
+	defer rescue.Recover()
 
-	text = strings.TrimSpace(text)
-	if text == "" {
+	chatInfo := extractChatInfo(update)
+	if chatInfo == nil || chatInfo.Text == "" {
 		return
 	}
 
-	entry := log.WithField("message", text).
-		WithField("from", name)
+	entry := log.WithField("message", chatInfo.Text).
+		WithField("from", chatInfo.Name)
 	entry.Info("receive message")
 
-	processMutex.Lock()
-	defer processMutex.Unlock()
-	//判断个人是否在配置文件中
-	var currentChannel *config.Subscribe
-	for i, info := range cfg.Subscribes {
-		//兼容原数据
-		if strings.TrimSpace(info.Type) == "" {
-			info.Type = config.ChatTypeChannel
-		}
-		if info.ChatId == chatId && info.Type == chatType {
-			currentChannel = cfg.Subscribes[i]
-			break
-		}
-	}
-	if currentChannel == nil {
-		currentChannel = &config.Subscribe{
-			Name:     name,
-			ChatId:   chatId,
-			Keywords: []string{},
-			Type:     chatType,
-		}
-		cfg.Subscribes = append(cfg.Subscribes, currentChannel)
-		cfg.Storage(app.ConfigFilePath)
-		//第一次添加，发送欢迎消息
-		tgBot.Send(tgbotapi.NewMessage(chatId, `欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明。`))
-	}
-
-	//处理命令
-	if strings.TrimSpace(text) == "" {
-		return
-	}
-	text = strings.TrimSpace(text)
-	var msg *tgbotapi.MessageConfig
-	var err error
-	switch {
-	case strings.HasPrefix(text, "/list"):
-		msg, err = processListEvent(cfg, currentChannel)
-	case strings.HasPrefix(text, "/add"):
-		msg, err = processAddEvent(cfg, text, currentChannel)
-	case strings.HasPrefix(text, "/delete"):
-		msg, err = processDeleteEvent(cfg, text, currentChannel)
-	case strings.HasPrefix(text, "/help"):
-		m := tgbotapi.NewMessage(currentChannel.ChatId, help)
-		msg = &m
-	case strings.HasPrefix(text, "/on"):
-		currentChannel.Status = "on"
-		cfg.Storage(app.ConfigFilePath)
-		m := tgbotapi.NewMessage(currentChannel.ChatId, "关键字通知已成功开启")
-		msg = &m
-	case strings.HasPrefix(text, "/off"):
-		currentChannel.Status = "off"
-		cfg.Storage(app.ConfigFilePath)
-		m := tgbotapi.NewMessage(currentChannel.ChatId, "关键字通知已成功关闭")
-		msg = &m
-	case strings.HasPrefix(text, "/quit"):
-		var channels []*config.Subscribe
-		for i, info := range cfg.Subscribes {
-			if info.ChatId != chatId {
-				channels = append(channels, cfg.Subscribes[i])
-			}
-		}
-		cfg.Subscribes = channels
-		cfg.Storage(app.ConfigFilePath)
-		m := tgbotapi.NewMessage(currentChannel.ChatId, "Bye~您现在可以移除本机器人了\n期待您的再次使用")
-		msg = &m
-	case strings.HasPrefix(text, "/status") && currentChannel.ChatId == cfg.AdminId:
-		//汇总当前状态
-		subscribers := len(cfg.Subscribes)
-		//当天发送次数
-		notifyLock.Lock()
-		defer notifyLock.Unlock()
-		todaySend := int64(0)
-		k := time.Now().Format(carbon.DateFormat)
-		if v, ok := noticeHistory[k]; ok {
-			todaySend = v
-		}
-		var ip = curl()
-		if strings.TrimSpace(ip) == "" {
-			ip = "未知"
-		} else {
-			mask := strings.Split(ip, ".")
-			ip = mask[0] + ".\\*." + mask[2] + "." + mask[3]
-		}
-		var message = fmt.Sprintf("当前状态: \n订阅数: %d \n当天发送: %d \n当前IP: %s", subscribers, todaySend, ip)
-		m := tgbotapi.NewMessage(currentChannel.ChatId, message)
-		msg = &m
-	default:
+	subscriber := ensureSubscriber(chatInfo)
+	if subscriber == nil || subscriber.Status == "quit" {
 		return
 	}
 
-	if err != nil {
-		tgBot.Send(tgbotapi.NewMessage(currentChannel.ChatId, err.Error()))
+	cmd, args := parseCommand(chatInfo.Text)
+	if cmd == "" {
 		return
 	}
+
+	// 特殊处理 status 命令
+	if cmd == cmdStatus && subscriber.ChatId == cfg.AdminId {
+		handleStatus(subscriber)
+		return
+	}
+	defer func() {
+		SubCacheInstance().Del(subscriber.ChatId)
+		SubCacheInstance().ReloadAll()
+	}()
+	handler, exists := commandHandlers[cmd]
+	if !exists {
+		return
+	}
+
+	msg, err := handler(subscriber, args)
+	if err != nil || msg == nil {
+		return
+	}
+
+	sendMessage(msg)
+}
+
+// ensureSubscriber 确保订阅者存在
+func ensureSubscriber(info *ChatInfo) *db.Subscribe {
+	subscriber := db.GetSubscribeWithChatId(info.ChatID)
+	if subscriber == nil {
+		tgBot.Send(tgbotapi.NewMessage(info.ChatID, "欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明。"))
+		db.AddSubscribe(&db.Subscribe{
+			Name:      info.Name,
+			ChatId:    info.ChatID,
+			Status:    "on",
+			Type:      info.ChatType,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		})
+		subscriber = db.GetSubscribeWithChatId(info.ChatID)
+	}
+	return subscriber
+}
+
+// parseCommand 解析命令和参数
+func parseCommand(text string) (string, []string) {
+	parts := splitAndClean(text)
+	if len(parts) == 0 {
+		return "", nil
+	}
+	return parts[0], parts[1:]
+}
+
+// splitAndClean 分割并清理字符串
+func splitAndClean(text string) []string {
+	words := strings.Split(text, " ")
+	return funk.FilterString(words, func(s string) bool {
+		return strings.TrimSpace(s) != ""
+	})
+}
+
+// sendMessage 发送消息
+func sendMessage(msg *tgbotapi.MessageConfig) {
 	msg.ParseMode = tgbotapi.ModeMarkdown
 	result, err := tgBot.Send(msg)
-	log.WithField("msg", msg.Text)
 	if err != nil {
 		log.WithField("msg", msg.Text).
 			WithField("error", err).
-			Error("send message  failure")
+			Error("send message failure")
 	} else {
 		log.WithField("msg", msg.Text).
 			WithField("result id", result.MessageID).
@@ -224,81 +211,115 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 	}
 }
 
-func processDeleteEvent(cfg *config.Config, postText string, currentChannel *config.Subscribe) (*tgbotapi.MessageConfig, error) {
-	words := strings.Split(postText, " ")
-	var deletes = make(map[string]struct{})
-	var delWords []string
-	words = funk.FilterString(words, func(s string) bool {
+// 命令处理函数
+func handleList(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
+	keywords := funk.UniqString(sub.KeywordsArray)
+	keywords = funk.FilterString(keywords, func(s string) bool {
 		return strings.TrimSpace(s) != ""
 	})
-	words = funk.UniqString(words)
+	msg := tgbotapi.NewMessage(sub.ChatId, "当前关键字: "+strings.Join(keywords, " , "))
+	return &msg, nil
+}
 
-	if len(words) == 1 {
+func handleAdd(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, error) {
+	if len(args) == 0 {
+		return nil, errors.New("请输入你要添加的关键字, 例如: /add keyword")
+	}
+
+	args = funk.Map(args, func(s string) string {
+		return strings.Trim(strings.TrimSpace(s), "{}")
+	}).([]string)
+
+	sub.KeywordsArray = append(sub.KeywordsArray, args...)
+	db.UpdateSubscribe(sub)
+
+	msg := tgbotapi.NewMessage(sub.ChatId, "关键字添加成功 "+strings.Join(args, " , "))
+	return &msg, nil
+}
+
+func handleDelete(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, error) {
+	if len(args) == 0 {
 		return nil, errors.New("请输入你要删除的关键字, 例如: /delete keyword")
 	}
-	words = words[1:]
-	for _, word := range words {
-		if word == "" {
-			continue
-		}
 
-		for _, v := range currentChannel.Keywords {
-			_, ok := deletes[v]
-			if strings.ToLower(v) == strings.ToLower(word) && !ok {
-				deletes[word] = struct{}{}
+	deletes := make(map[string]struct{})
+	var delWords []string
+
+	for _, word := range args {
+		for _, v := range sub.KeywordsArray {
+			if strings.ToLower(v) == strings.ToLower(word) {
+				deletes[v] = struct{}{}
 				delWords = append(delWords, word)
 			}
 		}
 	}
 
 	var newWords []string
-
-	for _, v := range currentChannel.Keywords {
+	for _, v := range sub.KeywordsArray {
 		if _, ok := deletes[v]; !ok {
 			newWords = append(newWords, v)
 		}
 	}
 
-	currentChannel.Keywords = newWords
-	cfg.Storage(app.ConfigFilePath)
-	msg := tgbotapi.NewMessage(currentChannel.ChatId, "关键字删除成功 "+strings.Join(delWords, " , "))
+	sub.KeywordsArray = newWords
+	db.UpdateSubscribe(sub)
+
+	msg := tgbotapi.NewMessage(sub.ChatId, "关键字删除成功 "+strings.Join(delWords, " , "))
 	return &msg, nil
 }
 
-func processAddEvent(cfg *config.Config, postText string, currentChannel *config.Subscribe) (*tgbotapi.MessageConfig, error) {
-	words := strings.Split(postText, " ")
-	words = funk.FilterString(words, func(s string) bool {
-		return strings.TrimSpace(s) != ""
-	})
-	words = funk.UniqString(words)
-	if len(words) == 1 {
-		return nil, errors.New("请输入你要添加的关键字, 例如: /add keyword")
-	}
-	words = funk.Map(words, func(s string) string {
-		v := strings.TrimSpace(s)
-		v = strings.Trim(v, "{}")
-		return v
-	}).([]string)
-	currentChannel.Keywords = append(currentChannel.Keywords, words[1:]...)
-
-	cfg.Storage(app.ConfigFilePath)
-	msg := tgbotapi.NewMessage(currentChannel.ChatId, "关键字添加成功 "+strings.Join(words[1:], " , "))
+func handleHelp(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
+	msg := tgbotapi.NewMessage(sub.ChatId, helpText)
 	return &msg, nil
 }
 
-func processListEvent(cfg *config.Config, channel *config.Subscribe) (*tgbotapi.MessageConfig, error) {
-	var keywords []string
-	for _, info := range cfg.Subscribes {
-		if info.ChatId == channel.ChatId {
-			keywords = append(keywords, info.Keywords...)
-		}
-	}
-	keywords = funk.UniqString(keywords)
-	keywords = funk.FilterString(keywords, func(s string) bool {
-		return strings.TrimSpace(s) != ""
-	})
-	msg := tgbotapi.NewMessage(channel.ChatId, "当前关键字: "+strings.Join(keywords, " , "))
+func handleOn(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
+	sub.Status = "on"
+	db.UpdateSubscribe(sub)
+	msg := tgbotapi.NewMessage(sub.ChatId, "关键字通知已成功开启")
 	return &msg, nil
+}
+
+func handleOff(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
+	sub.Status = "off"
+	db.UpdateSubscribe(sub)
+	msg := tgbotapi.NewMessage(sub.ChatId, "关键字通知已成功关闭")
+	return &msg, nil
+}
+
+func handleQuit(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
+	sub.Status = "quit"
+	db.UpdateSubscribe(sub)
+	msg := tgbotapi.NewMessage(sub.ChatId, "Bye~您现在可以移除本机器人了\n期待您的再次使用")
+	return &msg, nil
+}
+
+func handleStatus(sub *db.Subscribe) {
+	subscribers := db.ListSubscribes()
+	todaySend := db.GetNotifyCountByDateTime(carbon.Now().StartOfDay().StdTime(), time.Now())
+
+	ip := getPublicIP()
+	if ip != "" {
+		parts := strings.Split(ip, ".")
+		ip = fmt.Sprintf("%s.\\*.%s.%s", parts[0], parts[2], parts[3])
+	} else {
+		ip = "未知"
+	}
+
+	message := fmt.Sprintf("当前状态: \n订阅数: %d \n当天发送: %d \n当前IP: %s",
+		len(subscribers), todaySend, ip)
+	msg := tgbotapi.NewMessage(sub.ChatId, message)
+	sendMessage(&msg)
+}
+
+func getPublicIP() string {
+	cmd := exec.Command("curl", "ip.sb", "-4")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out.String())
 }
 
 func TgBotInstance() *tgbotapi.BotAPI {

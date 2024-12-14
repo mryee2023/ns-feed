@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/matoous/go-nanoid/v2"
@@ -13,13 +12,13 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/rescue"
 	"github.com/zeromicro/go-zero/core/threading"
-	"ns-rss/src/app/config"
+	"ns-rss/src/app/db"
 )
 
-var history = make(map[int64]map[string]struct{})
+//var history = make(map[int64]map[string]struct{})
 
 // 发送计数
-var noticeHistory = make(map[string]int64)
+//var noticeHistory = make(map[string]int64)
 
 type NsFeed struct {
 	ctx    context.Context
@@ -100,24 +99,23 @@ func hasKeyword(title string, keywords []string) bool {
 
 }
 
-var mutex sync.Mutex
+//var mutex sync.Mutex
 
-func (f *NsFeed) postToChannel(c *config.Subscribe, feed *gofeed.Feed) {
+func (f *NsFeed) postToChannel(c *db.Subscribe, feed *gofeed.Feed) {
 	if len(c.Keywords) == 0 || c.Status == "off" {
 		return
 	}
-	mutex.Lock()
-	defer mutex.Unlock()
-	var his map[string]struct{}
-	his, ok := history[c.ChatId]
-	if !ok {
-		his = make(map[string]struct{})
-		history[c.ChatId] = his
-	}
+	//mutex.Lock()
+	//defer mutex.Unlock()
+
 	for _, item := range feed.Items {
-		_, exists := history[c.ChatId][item.Link]
-		if hasKeyword(item.Title, c.Keywords) && !exists {
-			history[c.ChatId][item.Link] = struct{}{}
+		exists := db.GetNotifyHistory(c.ChatId, item.Link) != nil
+		if hasKeyword(item.Title, c.KeywordsArray) && !exists {
+			db.AddNotifyHistory(&db.NotifyHistory{
+				ChatId: c.ChatId,
+				Url:    item.Link,
+				Title:  item.Title,
+			})
 			if f.bot != nil {
 				msg := NotifyMessage{
 					Text: fmt.Sprintf("📢 *%s*\n\n🕐 %s\n\n👉 %s",
@@ -147,7 +145,9 @@ func (f *NsFeed) fetchRss() {
 	}
 
 	var wg threading.RoutineGroup
-	for _, channel := range f.svc.Config.Subscribes {
+	Subscribes := SubCacheInstance().All()
+
+	for _, channel := range Subscribes {
 		channel := channel
 		wg.RunSafe(func() {
 			f.postToChannel(channel, feed)

@@ -19,10 +19,12 @@ import (
 	"gopkg.in/yaml.v3"
 	"ns-rss/src/app"
 	config2 "ns-rss/src/app/config"
+	"ns-rss/src/app/db"
 	"ns-rss/src/app/lib"
 )
 
 var configFile = flag.String("f", "/etc/config.yaml", "the config file")
+var dbFile = flag.String("db", "/db/sqlite.db", "the db file")
 var config config2.Config
 var bot lib.BotNotifier
 
@@ -35,6 +37,24 @@ func getAbsolutePath() string {
 	// 获取绝对路径
 	return filepath.Dir(exe)
 }
+
+func syncSubscribes(subs []*config2.Subscribe) {
+	//write to db
+	for _, subscribe := range subs {
+		if len(subscribe.Keywords) > 0 {
+			db.AddSubscribe(&db.Subscribe{
+				Name:      subscribe.Name,
+				ChatId:    subscribe.ChatId,
+				Keywords:  app.ToJson(subscribe.Keywords),
+				Status:    subscribe.Status,
+				Type:      subscribe.Type,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			})
+		}
+	}
+}
+
 func main() {
 	log.SetFormatter(&log.JSONFormatter{
 		TimestampFormat: "2006-01-02 15:04:05",
@@ -53,15 +73,13 @@ func main() {
 		rescue.Recover()
 	}()
 
-	//file, err := os.OpenFile(filepath.Join(getAbsolutePath(), "ns-feed.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-	//defer file.Close()
-	//log.SetOutput(file)
 	log.SetOutput(os.Stdout)
-	//log.SetOutput(io.MultiWriter(file, os.Stdout))
+
 	flag.Parse()
+
+	if e := db.InitDB(*dbFile); e != nil {
+		log.Fatalf("init db failure:%v", e)
+	}
 
 	b, err := os.ReadFile(*configFile)
 	if err != nil {
@@ -78,17 +96,12 @@ func main() {
 		log.Fatalf("error: invalid bot platform")
 	}
 
+	syncSubscribes(config.Subscribes)
+
 	proc.AddShutdownListener(func() {
 		bot.Notify(lib.NotifyMessage{Text: "⚠️ NodeSeek Feed服务已停止", ChatId: &config.AdminId})
 		log.Info("service shutdown")
 	})
-
-	go func() {
-		defer func() {
-			rescue.Recover()
-		}()
-
-	}()
 
 	lib.InitTgBotListen(&config)
 	svc := lib.NewServiceCtx(lib.TgBotInstance(), &config)
