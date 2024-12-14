@@ -3,3 +3,4 @@ bin
 /src/etc/config.yaml
 build
 db
+/ns-rss

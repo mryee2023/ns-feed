@@ -51,6 +51,7 @@ func syncSubscribes(subs []*config2.Subscribe) {
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 			})
+			fmt.Println("sync subscribe:", subscribe.ChatId)
 		}
 	}
 }

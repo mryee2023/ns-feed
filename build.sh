@@ -36,8 +36,15 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     if [ "$GOOS" == "windows" ]; then
         OUTPUT_NAME+=".exe"
     fi
-    echo "Building for $GOOS/$GOARCH..."
-    env GOOS=$GOOS GOARCH=$GOARCH go build -o ./bin/$OUTPUT_NAME ./src/main.go
+    if [ "$GOOS" == "darwin" ] && [ "$(uname)" == "Darwin" ]; then
+        # 本地 Mac 编译启用 CGO
+        echo "Building for $GOOS/$GOARCH with CGO enabled..."
+        env CGO_ENABLED=1 GOOS=$GOOS GOARCH=$GOARCH go build -o ./bin/$OUTPUT_NAME ./src/main.go
+    else
+        # 跨平台编译禁用 CGO
+        echo "Building for $GOOS/$GOARCH with CGO disabled..."
+        env CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -o ./bin/$OUTPUT_NAME ./src/main.go
+    fi
 done
 
 # Docker 相关操作
