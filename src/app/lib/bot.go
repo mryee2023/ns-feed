@@ -2,8 +2,11 @@ package lib
 
 import (
 	"strings"
+	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/golang-module/carbon/v2"
 	"github.com/spf13/cast"
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/rescue"
@@ -48,6 +51,8 @@ var Replacer = strings.NewReplacer("_", "\\_",
 	".", "\\.",
 	"!", "\\!")
 
+var notifyLock sync.Mutex
+
 func (t *TelegramNotifier) Notify(msg NotifyMessage) {
 	tg := TgBotInstance()
 	if tg == nil {
@@ -72,4 +77,11 @@ func (t *TelegramNotifier) Notify(msg NotifyMessage) {
 		logx.Infow("send telegram message success", logx.Field("result", v.MessageID), logx.Field("msg", msg.Text), logx.Field("chatId", tgMsg.ChatID))
 	}
 
+	notifyLock.Lock()
+	defer notifyLock.Unlock()
+	k := time.Now().Format(carbon.DateFormat)
+	if _, ok := noticeHistory[k]; !ok {
+		noticeHistory[k] = 1
+	}
+	noticeHistory[k]++
 }

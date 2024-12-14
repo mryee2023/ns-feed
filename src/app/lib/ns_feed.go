@@ -23,6 +23,9 @@ import (
 //	}
 var history = make(map[int64]map[string]struct{})
 
+// 发送计数
+var noticeHistory = make(map[string]int64)
+
 type NsFeed struct {
 	ctx    context.Context
 	svc    *ServiceCtx
