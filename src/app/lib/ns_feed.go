@@ -16,12 +16,10 @@ import (
 	"ns-rss/src/app/config"
 )
 
-// 存放发送历史
-//
-//	{
-//	   "chatId":{"link1":{},"link2":{}}
-//	}
 var history = make(map[int64]map[string]struct{})
+
+// 发送计数
+var noticeHistory = make(map[string]int64)
 
 type NsFeed struct {
 	ctx    context.Context
@@ -64,11 +62,20 @@ func (f *NsFeed) Start() {
 		rescue.Recover()
 	}()
 	f.logger.Infow("start ns feed......")
+
+	ds, e := time.ParseDuration(f.svc.Config.FetchTimeInterval)
+	if e != nil {
+		f.logger.Errorw("parse duration failed", logx.Field("err", e), logx.Field("FetchTimeInterval", f.svc.Config.FetchTimeInterval))
+		ds = 10 * time.Second
+	}
+	if ds < 10*time.Second {
+		ds = 10 * time.Second
+	}
 	go func() {
 		defer func() {
 			rescue.Recover()
 		}()
-		tk := time.NewTicker(10 * time.Second)
+		tk := time.NewTicker(ds)
 		defer tk.Stop()
 		for {
 			select {
@@ -95,7 +102,7 @@ func hasKeyword(title string, keywords []string) bool {
 
 var mutex sync.Mutex
 
-func (f *NsFeed) postToChannel(c *config.ChannelInfo, feed *gofeed.Feed) {
+func (f *NsFeed) postToChannel(c *config.Subscribe, feed *gofeed.Feed) {
 	if len(c.Keywords) == 0 || c.Status == "off" {
 		return
 	}
@@ -140,31 +147,12 @@ func (f *NsFeed) fetchRss() {
 	}
 
 	var wg threading.RoutineGroup
-	for _, channel := range f.svc.Config.Channels {
+	for _, channel := range f.svc.Config.Subscribes {
 		channel := channel
 		wg.RunSafe(func() {
 			f.postToChannel(channel, feed)
 		})
 	}
 	wg.Wait()
-	//
-	//for _, item := range feed.Items {
-	//	item := item
-	//	wg.RunSafe(func() {})
-	//_, exists := history[item.Link]
-	//if hasKeyword(item.Title, f.svc.Config.Keywords) && !exists {
-	//	history[item.Link] = struct{}{}
-	//	if f.bot != nil {
-	//		msg := NotifyMessage{
-	//			Text: fmt.Sprintf("📢 *%s*\n\n🕐 %s\n\n👉 [%s](%s)",
-	//				item.Title,
-	//				item.PublishedParsed.Add(time.Hour*8).Format("2006-01-02 15:04:05"),
-	//				item.Link, item.Link),
-	//			ChatId: &f.svc.Config.TgChatId,
-	//		}
-	//		f.Add(msg)
-	//	}
-	//}
-	//}
 
 }

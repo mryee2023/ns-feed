@@ -1,18 +1,7 @@
 port: :8080
-tgToken: 7727116717:AAH31RbD5ygRkuWGO1EaCcfKybAoirykxaY
-tgChatId: 0
-nsFeed: https://rss.nodeseek.com/
-alterChatId: 0
-channels:
-    - name: hellomryee
-      chatId: 415257783
-      keywords:
-        - pqs
-      status: "off"
-      type: chat
-    - name: 我的测试频道
-      chatId: -1002275646452
-      keywords:
-        - 你好
-      status: "off"
-      type: channel
+tgToken: your_tg_token
+nsFeed: https://rss.nodeseek.com
+adminId: 0000
+fetchTimeInterval: 10s
+subscribes:
+

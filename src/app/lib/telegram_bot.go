@@ -1,11 +1,16 @@
 package lib
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/golang-module/carbon/v2"
 	log "github.com/sirupsen/logrus"
 	"github.com/thoas/go-funk"
 	"github.com/zeromicro/go-zero/core/rescue"
@@ -60,6 +65,22 @@ func updates(cfg *config.Config) {
 
 var processMutex sync.Mutex
 
+func curl() string {
+	// 准备命令
+	cmd := exec.Command("curl", "ip.sb", "-4")
+
+	// 捕获输出
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	// 执行命令
+	err := cmd.Run()
+	if err != nil {
+		return ""
+	}
+	return out.String()
+}
+
 func processMessage(cfg *config.Config, update tgbotapi.Update) {
 	defer func() {
 		rescue.Recover()
@@ -98,31 +119,29 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 	processMutex.Lock()
 	defer processMutex.Unlock()
 	//判断个人是否在配置文件中
-	var currentChannel *config.ChannelInfo
-	for i, info := range cfg.Channels {
+	var currentChannel *config.Subscribe
+	for i, info := range cfg.Subscribes {
 		//兼容原数据
 		if strings.TrimSpace(info.Type) == "" {
 			info.Type = config.ChatTypeChannel
 		}
 		if info.ChatId == chatId && info.Type == chatType {
-			currentChannel = cfg.Channels[i]
+			currentChannel = cfg.Subscribes[i]
 			break
 		}
 	}
 	if currentChannel == nil {
-		currentChannel = &config.ChannelInfo{
+		currentChannel = &config.Subscribe{
 			Name:     name,
 			ChatId:   chatId,
 			Keywords: []string{},
 			Type:     chatType,
 		}
-		cfg.Channels = append(cfg.Channels, currentChannel)
+		cfg.Subscribes = append(cfg.Subscribes, currentChannel)
 		cfg.Storage(app.ConfigFilePath)
 		//第一次添加，发送欢迎消息
-		tgBot.Send(tgbotapi.NewMessage(chatId, "欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明"))
+		tgBot.Send(tgbotapi.NewMessage(chatId, `欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明。`))
 	}
-
-	//text := update.Message.Text
 
 	//处理命令
 	if strings.TrimSpace(text) == "" {
@@ -152,15 +171,36 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 		m := tgbotapi.NewMessage(currentChannel.ChatId, "关键字通知已成功关闭")
 		msg = &m
 	case strings.HasPrefix(text, "/quit"):
-		var channels []*config.ChannelInfo
-		for i, info := range cfg.Channels {
+		var channels []*config.Subscribe
+		for i, info := range cfg.Subscribes {
 			if info.ChatId != chatId {
-				channels = append(channels, cfg.Channels[i])
+				channels = append(channels, cfg.Subscribes[i])
 			}
 		}
-		cfg.Channels = channels
+		cfg.Subscribes = channels
 		cfg.Storage(app.ConfigFilePath)
 		m := tgbotapi.NewMessage(currentChannel.ChatId, "Bye~您现在可以移除本机器人了\n期待您的再次使用")
+		msg = &m
+	case strings.HasPrefix(text, "/status") && currentChannel.ChatId == cfg.AdminId:
+		//汇总当前状态
+		subscribers := len(cfg.Subscribes)
+		//当天发送次数
+		notifyLock.Lock()
+		defer notifyLock.Unlock()
+		todaySend := int64(0)
+		k := time.Now().Format(carbon.DateFormat)
+		if v, ok := noticeHistory[k]; ok {
+			todaySend = v
+		}
+		var ip = curl()
+		if strings.TrimSpace(ip) == "" {
+			ip = "未知"
+		} else {
+			mask := strings.Split(ip, ".")
+			ip = mask[0] + ".\\*." + mask[2] + "." + mask[3]
+		}
+		var message = fmt.Sprintf("当前状态: \n订阅数: %d \n当天发送: %d \n当前IP: %s", subscribers, todaySend, ip)
+		m := tgbotapi.NewMessage(currentChannel.ChatId, message)
 		msg = &m
 	default:
 		return
@@ -184,7 +224,7 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 	}
 }
 
-func processDeleteEvent(cfg *config.Config, postText string, currentChannel *config.ChannelInfo) (*tgbotapi.MessageConfig, error) {
+func processDeleteEvent(cfg *config.Config, postText string, currentChannel *config.Subscribe) (*tgbotapi.MessageConfig, error) {
 	words := strings.Split(postText, " ")
 	var deletes = make(map[string]struct{})
 	var delWords []string
@@ -225,7 +265,7 @@ func processDeleteEvent(cfg *config.Config, postText string, currentChannel *con
 	return &msg, nil
 }
 
-func processAddEvent(cfg *config.Config, postText string, currentChannel *config.ChannelInfo) (*tgbotapi.MessageConfig, error) {
+func processAddEvent(cfg *config.Config, postText string, currentChannel *config.Subscribe) (*tgbotapi.MessageConfig, error) {
 	words := strings.Split(postText, " ")
 	words = funk.FilterString(words, func(s string) bool {
 		return strings.TrimSpace(s) != ""
@@ -246,9 +286,9 @@ func processAddEvent(cfg *config.Config, postText string, currentChannel *config
 	return &msg, nil
 }
 
-func processListEvent(cfg *config.Config, channel *config.ChannelInfo) (*tgbotapi.MessageConfig, error) {
+func processListEvent(cfg *config.Config, channel *config.Subscribe) (*tgbotapi.MessageConfig, error) {
 	var keywords []string
-	for _, info := range cfg.Channels {
+	for _, info := range cfg.Subscribes {
 		if info.ChatId == channel.ChatId {
 			keywords = append(keywords, info.Keywords...)
 		}

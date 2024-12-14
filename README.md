@@ -24,3 +24,30 @@ NodeSeek Feed 关键字通知机器人是一个Telegram机器人，用于监控N
 ### 3. 其他
 
 当前已实现在频道中推送关键字通知，后续会增加个人中推送关键字通知的功能。
+
+
+### 4. 安装说明
+
+Docker安装
+```shell
+docker run -d --name ns-feed-bot -v /path/to/config.yaml:/etc/config.yaml i0x3eb/ns-feed-bot:latest
+```
+
+
+### 5. 配置文件说明
+
+```yaml
+port: :8080   # 机器人监听端口，默认8080，便于uptime检测
+tgToken: your_telegram_bot_token # 机器人Token
+nsFeed: https://rss.nodeseek.com
+adminId: 0 # 管理员ID,系统启动/退出时会发送通知，执行/status命令时可发送汇总数据
+fetchTimeInterval: 10s   # RSS抓取时间间隔,最小10s
+subscribes: # 订阅列表，这里无需配置，系统会自动添加
+  - name: test  # 订阅名称
+    chatId: -989876 # 频道ID或个人ID
+    keywords: # 关键字列表
+      - test
+    status: "on"  # 订阅状态，on/off
+    type: channel  # 订阅类型，channel/person
+
+```

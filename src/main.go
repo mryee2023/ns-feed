@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -36,7 +35,6 @@ func getAbsolutePath() string {
 	// 获取绝对路径
 	return filepath.Dir(exe)
 }
-
 func main() {
 	log.SetFormatter(&log.JSONFormatter{
 		TimestampFormat: "2006-01-02 15:04:05",
@@ -55,14 +53,14 @@ func main() {
 		rescue.Recover()
 	}()
 
-	file, err := os.OpenFile(filepath.Join(getAbsolutePath(), "ns-feed.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
+	//file, err := os.OpenFile(filepath.Join(getAbsolutePath(), "ns-feed.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+	//defer file.Close()
 	//log.SetOutput(file)
-	//log.SetOutput(os.Stdout)
-	log.SetOutput(io.MultiWriter(file, os.Stdout))
+	log.SetOutput(os.Stdout)
+	//log.SetOutput(io.MultiWriter(file, os.Stdout))
 	flag.Parse()
 
 	b, err := os.ReadFile(*configFile)
@@ -75,13 +73,13 @@ func main() {
 		log.Fatalf("unmarshal config failure: %v", err)
 	}
 
-	bot = lib.NewTelegramNotifier(config.TgToken, cast.ToString(config.TgChatId))
+	bot = lib.NewTelegramNotifier(config.TgToken, cast.ToString(config.AdminId))
 	if bot == nil {
 		log.Fatalf("error: invalid bot platform")
 	}
 
 	proc.AddShutdownListener(func() {
-		bot.Notify(lib.NotifyMessage{Text: "⚠️ NodeSeek Feed服务已停止", ChatId: &config.AlterChatId})
+		bot.Notify(lib.NotifyMessage{Text: "⚠️ NodeSeek Feed服务已停止", ChatId: &config.AdminId})
 		log.Info("service shutdown")
 	})
 
@@ -95,7 +93,7 @@ func main() {
 	lib.InitTgBotListen(&config)
 	svc := lib.NewServiceCtx(lib.TgBotInstance(), &config)
 	app.ConfigFilePath = *configFile
-	bot.Notify(lib.NotifyMessage{Text: fmt.Sprintf("📢 NodeSeek Feed服务已启动。"), ChatId: &config.AlterChatId})
+	bot.Notify(lib.NotifyMessage{Text: fmt.Sprintf("📢 NodeSeek Feed服务已启动。"), ChatId: &config.AdminId})
 
 	go func() {
 		feeder := lib.NewNsFeed(context.Background(), svc)

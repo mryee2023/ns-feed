@@ -6,11 +6,7 @@ import (
 
 func TestConfig_Storage(t *testing.T) {
 	type fields struct {
-		TgToken     string
-		TgChatId    int64
-		NsFeed      string
-		AlterChatId int64
-		Keywords    []string
+		cnf *Config
 	}
 	type args struct {
 		path string
@@ -23,11 +19,22 @@ func TestConfig_Storage(t *testing.T) {
 		{
 			name: "TestConfig_Storage",
 			fields: fields{
-				TgToken:     "myToken",
-				TgChatId:    -123,
-				NsFeed:      "https://rss.nodeseek.com",
-				AlterChatId: -456,
-				Keywords:    []string{"keyword1", "keyword2"},
+				cnf: &Config{
+					Port:              ":8080",
+					TgToken:           "your_telegram_bot_token",
+					NsFeed:            "https://rss.nodeseek.com",
+					AdminId:           0,
+					FetchTimeInterval: "10s",
+					Subscribes: []*Subscribe{
+						{
+							Name:     "test",
+							ChatId:   -989876,
+							Keywords: []string{"test"},
+							Status:   "on",
+							Type:     "",
+						},
+					},
+				},
 			},
 			args: args{
 				path: "./../../etc/config.simple.yaml",
@@ -36,14 +43,7 @@ func TestConfig_Storage(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &Config{
-				TgToken:     tt.fields.TgToken,
-				TgChatId:    tt.fields.TgChatId,
-				NsFeed:      tt.fields.NsFeed,
-				AlterChatId: tt.fields.AlterChatId,
-				//Keywords:    tt.fields.Keywords,
-			}
-			c.Storage(tt.args.path)
+			tt.fields.cnf.Storage(tt.args.path)
 		})
 	}
 }
