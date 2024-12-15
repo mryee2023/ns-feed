@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  init:
+    image: alpine:latest
+    volumes:
+      - ./data:/data
+    command: sh -c "touch /data/sqlite.db && chown 65534:65534 /data/sqlite.db"
+
+  ns-feed-bot:
+    image: i0x3eb/ns-feed-bot:latest
+    container_name: ns-feed-bot
+    restart: unless-stopped
+    depends_on:
+      - init
+    volumes:
+      - ./data/config.yaml:/etc/config.yaml:ro
+      - ./data/sqlite.db:/db/sqlite.db
+    environment:
+      - TZ=Asia/Shanghai
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
