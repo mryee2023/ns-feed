@@ -4,6 +4,9 @@ FROM golang:1.21-alpine AS builder
 # Set working directory
 WORKDIR /app
 
+# Install build dependencies
+RUN apk add --no-cache gcc musl-dev sqlite-dev
+
 # Copy go mod and sum files
 COPY go.mod go.sum ./
 
@@ -13,14 +16,14 @@ RUN go mod download
 # Copy the source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/ns-rss ./src/main.go
+# Build the application with CGO enabled
+RUN CGO_ENABLED=1 GOOS=linux go build -o /app/ns-rss ./src/main.go
 
 # Final stage
 FROM alpine:latest
 
-# Install ca-certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates
+# Install runtime dependencies
+RUN apk --no-cache add ca-certificates sqlite-libs
 
 WORKDIR /app
 
@@ -30,5 +33,5 @@ COPY --from=builder /app/ns-rss .
 # Create necessary directories if needed
 RUN mkdir -p /app/logs
 
-# Set the binary as the entrypoint
-ENTRYPOINT ["/app/ns-rss"]
+# Command to run
+CMD ["./ns-rss"]

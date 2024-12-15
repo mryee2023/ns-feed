@@ -25,6 +25,7 @@ import (
 
 var configFile = flag.String("f", "/etc/config.yaml", "the config file")
 var dbFile = flag.String("db", "/db/sqlite.db", "the db file")
+var syncFlag = flag.Bool("sync", false, "sync subscribes from config file to database")
 var config config2.Config
 var bot lib.BotNotifier
 
@@ -51,14 +52,17 @@ func syncSubscribes(subs []*config2.Subscribe) {
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 			})
+			fmt.Println("sync subscribe:", subscribe.ChatId)
 		}
 	}
 }
 
 func main() {
-	log.SetFormatter(&log.JSONFormatter{
+	flag.Parse()
+
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp:   true,
 		TimestampFormat: "2006-01-02 15:04:05",
-		PrettyPrint:     false,
 	})
 
 	log.SetLevel(log.InfoLevel)
@@ -75,8 +79,6 @@ func main() {
 
 	log.SetOutput(os.Stdout)
 
-	flag.Parse()
-
 	if e := db.InitDB(*dbFile); e != nil {
 		log.Fatalf("init db failure:%v", e)
 	}
@@ -91,12 +93,17 @@ func main() {
 		log.Fatalf("unmarshal config failure: %v", err)
 	}
 
+	if *syncFlag {
+		log.Info("Syncing subscribes from config file to database...")
+		syncSubscribes(config.Subscribes)
+		log.Info("Sync completed")
+		return
+	}
+
 	bot = lib.NewTelegramNotifier(config.TgToken, cast.ToString(config.AdminId))
 	if bot == nil {
 		log.Fatalf("error: invalid bot platform")
 	}
-
-	syncSubscribes(config.Subscribes)
 
 	proc.AddShutdownListener(func() {
 		bot.Notify(lib.NotifyMessage{Text: "⚠️ NodeSeek Feed服务已停止", ChatId: &config.AdminId})

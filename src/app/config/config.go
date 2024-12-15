@@ -29,7 +29,7 @@ type Config struct {
 	NsFeed            string       `yaml:"nsFeed"`
 	AdminId           int64        `yaml:"adminId"`
 	FetchTimeInterval string       `yaml:"fetchTimeInterval"` //抓取rss时间间隔
-	Subscribes        []*Subscribe `yaml:"subscribes"`
+	Subscribes        []*Subscribe `yaml:"channels"`
 }
 
 func (c *Config) Storage(path string) {
