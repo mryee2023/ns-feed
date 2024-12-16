@@ -28,10 +28,7 @@ RUN apk --no-cache add ca-certificates sqlite-libs
 WORKDIR /app
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /etc && \
-    mkdir -p /db && \
-    chown -R nobody:nobody /db && \
-    chmod 777 /db
+RUN mkdir -p /etc && mkdir -p /db && chown -R nobody:nobody /db
 
 # Copy the binary from builder
 COPY --from=builder /app/ns-rss .

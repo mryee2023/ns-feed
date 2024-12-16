@@ -18,6 +18,17 @@ services:
       - ./data/sqlite.db:/db/sqlite.db
     environment:
       - TZ=Asia/Shanghai
+      - TG_TOKEN=${TG_TOKEN:-}
+      - ADMIN_ID=${ADMIN_ID:-0}
+    # 如果设置了环境变量，使用命令行参数
+    command: >
+      sh -c '
+      if [ -n "$$TG_TOKEN" ] && [ "$$ADMIN_ID" != "0" ]; then
+        ./ns-rss --token "$$TG_TOKEN" --admin "$$ADMIN_ID" --db /db/sqlite.db
+      else
+        ./ns-rss -f /etc/config.yaml -db /db/sqlite.db
+      fi
+      '
     logging:
       driver: "json-file"
       options:

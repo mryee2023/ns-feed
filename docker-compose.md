@@ -3,13 +3,18 @@
 ## 目录结构
 ```
 .
-├── docker-compose.yml
+├── docker-compose.yml    # Docker Compose 配置文件
+├── .env                 # 环境变量配置（可选）
 └── data/
-    ├── config.yaml    # 配置文件
-    └── sqlite.db      # SQLite数据库文件
+    ├── config.yaml     # 配置文件（可选）
+    └── sqlite.db       # SQLite数据库文件
 ```
 
-## 使用步骤
+## 配置方式
+
+支持两种配置方式：
+
+### 1. 配置文件方式
 
 1. 创建必要的目录和文件：
 ```bash
@@ -23,25 +28,52 @@ cp src/etc/config.simple.yaml data/config.yaml
 vim data/config.yaml
 ```
 
-3. 启动服务：
+### 2. 环境变量方式
+
+1. 创建必要的目录：
+```bash
+mkdir -p data
+touch data/sqlite.db
+```
+
+2. 创建并修改环境变量文件：
+```bash
+cp .env.example .env
+vim .env
+```
+
+配置以下环境变量：
+- `TG_TOKEN`: Telegram Bot Token
+- `ADMIN_ID`: 管理员的 Telegram Chat ID
+
+## 启动和管理
+
+1. 启动服务：
 ```bash
 docker-compose up -d
 ```
 
-4. 查看日志：
+2. 查看日志：
 ```bash
 docker-compose logs -f
 ```
 
-5. 停止服务：
+3. 停止服务：
 ```bash
 docker-compose down
 ```
 
-6. 手动执行同步：
-```bash
-docker-compose exec ns-feed-bot ./ns-rss -f /etc/config.yaml -db /db/sqlite.db -sync
-```
+## 命令行参数说明
+
+当使用环境变量方式时，支持以下命令行参数：
+
+基本参数：
+- `--token`: Telegram Bot Token（必需）
+- `--admin`: 管理员的 Telegram Chat ID（必需）
+- `--db`: SQLite 数据库文件路径（默认：/db/sqlite.db）
+- `--feed`: NodeSeek RSS feed URL（默认：https://rss.nodeseek.com）
+- `--interval`: RSS抓取间隔（默认：10s）
+- `--port`: HTTP 服务端口（默认：:8080）
 
 ## 配置说明
 
@@ -52,3 +84,4 @@ docker-compose exec ns-feed-bot ./ns-rss -f /etc/config.yaml -db /db/sqlite.db -
   - 保留3个历史文件
 - 配置文件以只读方式挂载（ro）
 - SQLite数据库文件可读写
+- 优先使用环境变量配置，如果环境变量未设置则使用配置文件

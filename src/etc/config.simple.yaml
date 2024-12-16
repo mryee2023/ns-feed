@@ -3,5 +3,3 @@ tgToken: your_tg_token
 nsFeed: https://rss.nodeseek.com
 adminId: 0000
 fetchTimeInterval: 10s
-subscribes:
-
