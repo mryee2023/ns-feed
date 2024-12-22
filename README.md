@@ -30,7 +30,7 @@ NodeSeek Feed 关键字通知机器人是一个Telegram机器人，用于监控N
 
 Docker安装
 ```shell
-docker run -d --name ns-feed-bot -v /path/to/config.yaml:/etc/config.yaml /path/to/sqlite.db:/db/sqlite.db  i0x3eb/ns-feed-bot:latest
+docker run -d --name ns-feed-bot -v /path/to/config.yaml:/etc/config.yaml -v /path/to/sqlite.db:/db/sqlite.db  i0x3eb/ns-feed-bot:latest
 ```
 
 

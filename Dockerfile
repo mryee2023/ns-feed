@@ -27,11 +27,15 @@ RUN apk --no-cache add ca-certificates sqlite-libs
 
 WORKDIR /app
 
+# Create necessary directories with proper permissions
+RUN mkdir -p /etc && mkdir -p /db && chown -R nobody:nobody /db
+
 # Copy the binary from builder
 COPY --from=builder /app/ns-rss .
 
-# Create necessary directories if needed
-RUN mkdir -p /app/logs
+# Switch to non-root user
+USER nobody
 
-# Command to run
-CMD ["./ns-rss"]
+# Set the entrypoint
+ENTRYPOINT ["./ns-rss"]
+CMD ["-f", "/etc/config.yaml", "-db", "/db/sqlite.db"]

@@ -23,38 +23,33 @@ import (
 	"ns-rss/src/app/lib"
 )
 
-var configFile = flag.String("f", "/etc/config.yaml", "the config file")
-var dbFile = flag.String("db", "/db/sqlite.db", "the db file")
-var syncFlag = flag.Bool("sync", false, "sync subscribes from config file to database")
-var config config2.Config
+var (
+	// 配置文件
+	configFile = flag.String("f", "", "配置文件路径")
+	
+	// 数据库相关
+	dbFile = flag.String("db", "/db/sqlite.db", "SQLite数据库文件路径")
+	
+	// Telegram相关
+	tgToken = flag.String("token", "", "Telegram Bot Token")
+	adminId = flag.Int64("admin", 0, "管理员的 Telegram Chat ID")
+	
+	// RSS相关
+	nsFeed = flag.String("feed", "https://rss.nodeseek.com", "NodeSeek RSS feed URL")
+	fetchInterval = flag.Duration("interval", 10*time.Second, "RSS抓取间隔")
+	
+	// HTTP服务相关
+	port = flag.String("port", ":8080", "HTTP服务端口")
+)
+
 var bot lib.BotNotifier
 
 func getAbsolutePath() string {
-	// 获取当前可执行文件的路径
 	exe, err := os.Executable()
 	if err != nil {
 		log.Fatalf("os.Executable() failed: %v", err)
 	}
-	// 获取绝对路径
 	return filepath.Dir(exe)
-}
-
-func syncSubscribes(subs []*config2.Subscribe) {
-	//write to db
-	for _, subscribe := range subs {
-		if len(subscribe.Keywords) > 0 {
-			db.AddSubscribe(&db.Subscribe{
-				Name:      subscribe.Name,
-				ChatId:    subscribe.ChatId,
-				Keywords:  app.ToJson(subscribe.Keywords),
-				Status:    subscribe.Status,
-				Type:      subscribe.Type,
-				CreatedAt: time.Now(),
-				UpdatedAt: time.Now(),
-			})
-			fmt.Println("sync subscribe:", subscribe.ChatId)
-		}
-	}
 }
 
 func main() {
@@ -79,66 +74,94 @@ func main() {
 
 	log.SetOutput(os.Stdout)
 
-	if e := db.InitDB(*dbFile); e != nil {
-		log.Fatalf("init db failure:%v", e)
+	// 初始化数据库
+	if err := db.InitDB(*dbFile); err != nil {
+		log.Fatalf("init db failure:%v", err)
 	}
 
-	b, err := os.ReadFile(*configFile)
-	if err != nil {
-		log.Fatalf("load config failure :%s, %v", *configFile, err)
+	// 如果提供了配置文件，从配置文件读取配置
+	var config config2.Config
+	if *configFile != "" {
+		b, err := os.ReadFile(*configFile)
+		if err != nil {
+			log.Fatalf("load config failure :%s, %v", *configFile, err)
+		}
+
+		err = yaml.Unmarshal(b, &config)
+		if err != nil {
+			log.Fatalf("unmarshal config failure: %v", err)
+		}
+
+		// 使用配置文件中的值
+		if config.Port != "" {
+			*port = config.Port
+		}
+		if config.TgToken != "" {
+			*tgToken = config.TgToken
+		}
+		if config.AdminId != 0 {
+			*adminId = config.AdminId
+		}
+		if config.NsFeed != "" {
+			*nsFeed = config.NsFeed
+		}
+		if config.FetchTimeInterval != "" {
+			interval, err := time.ParseDuration(config.FetchTimeInterval)
+			if err == nil {
+				*fetchInterval = interval
+			}
+		}
 	}
 
-	err = yaml.Unmarshal(b, &config)
-	if err != nil {
-		log.Fatalf("unmarshal config failure: %v", err)
+	// 验证必要参数
+	if *tgToken == "" {
+		log.Fatal("Telegram bot token is required")
+	}
+	if *adminId == 0 {
+		log.Fatal("Admin chat ID is required")
 	}
 
-	if *syncFlag {
-		log.Info("Syncing subscribes from config file to database...")
-		syncSubscribes(config.Subscribes)
-		log.Info("Sync completed")
-		return
-	}
-
-	bot = lib.NewTelegramNotifier(config.TgToken, cast.ToString(config.AdminId))
+	// 初始化机器人
+	bot = lib.NewTelegramNotifier(*tgToken, cast.ToString(*adminId))
 	if bot == nil {
-		log.Fatalf("error: invalid bot platform")
+		log.Fatal("error: invalid bot platform")
 	}
 
+	// 设置关闭和恢复处理
 	proc.AddShutdownListener(func() {
-		bot.Notify(lib.NotifyMessage{Text: "⚠️ NodeSeek Feed服务已停止", ChatId: &config.AdminId})
+		bot.Notify(lib.NotifyMessage{Text: "⚠️ NodeSeek Feed服务已停止", ChatId: adminId})
 		log.Info("service shutdown")
 	})
 
+	rescue.Recover(func() {
+		bot.Notify(lib.NotifyMessage{Text: "⚠️ NodeSeek Feed服务发生异常", ChatId: adminId})
+	})
+
+	// 初始化服务
 	lib.InitTgBotListen(&config)
 	svc := lib.NewServiceCtx(lib.TgBotInstance(), &config)
-	app.ConfigFilePath = *configFile
-	bot.Notify(lib.NotifyMessage{Text: fmt.Sprintf("📢 NodeSeek Feed服务已启动。"), ChatId: &config.AdminId})
+	if *configFile != "" {
+		app.ConfigFilePath = *configFile
+	}
 
+	// 启动RSS抓取
 	go func() {
 		feeder := lib.NewNsFeed(context.Background(), svc)
 		feeder.SetBot(bot)
 		feeder.Start()
 	}()
-	var port = ":8080"
-	if config.Port != "" {
-		port = config.Port
-	}
 
-	// 定义路由
+	// 启动HTTP服务
 	http.HandleFunc("/ping", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
-		var rtn = make(map[string]interface{})
-		rtn["code"] = 1000
-		rtn["msg"] = time.Now().Format("2006-01-02 15:04:05")
 		_, _ = writer.Write([]byte(`{"code":1000,"msg":"pong"}`))
 	})
-	log.Infof("Service start success,Listen On " + port)
-	if err := http.ListenAndServe(port, nil); err != nil {
+
+	log.Info("NodeSeek Feed服务启动成功")
+	bot.Notify(lib.NotifyMessage{Text: "✅ NodeSeek Feed服务已启动", ChatId: adminId})
+
+	log.Infof("Service start success, Listen On %s", *port)
+	if err := http.ListenAndServe(*port, nil); err != nil {
 		log.Fatalf("start web server failure : %v", err)
 	}
-	//开启web服务
-
-	select {}
-
 }

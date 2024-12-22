@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  init:
+    image: alpine:latest
+    volumes:
+      - ./data:/data
+    command: sh -c "touch /data/sqlite.db && chown 65534:65534 /data/sqlite.db"
+
+  ns-feed-bot:
+    image: i0x3eb/ns-feed-bot:latest
+    container_name: ns-feed-bot
+    restart: unless-stopped
+    depends_on:
+      - init
+    volumes:
+      - ./data/config.yaml:/etc/config.yaml:ro
+      - ./data/sqlite.db:/db/sqlite.db
+    environment:
+      - TZ=Asia/Shanghai
+      - TG_TOKEN=${TG_TOKEN:-}
+      - ADMIN_ID=${ADMIN_ID:-0}
+    # 如果设置了环境变量，使用命令行参数
+    command: >
+      sh -c '
+      if [ -n "$$TG_TOKEN" ] && [ "$$ADMIN_ID" != "0" ]; then
+        ./ns-rss --token "$$TG_TOKEN" --admin "$$ADMIN_ID" --db /db/sqlite.db
+      else
+        ./ns-rss -f /etc/config.yaml -db /db/sqlite.db
+      fi
+      '
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
