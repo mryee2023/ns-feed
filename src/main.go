@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,18 +25,18 @@ import (
 var (
 	// 配置文件
 	configFile = flag.String("f", "", "配置文件路径")
-	
+
 	// 数据库相关
 	dbFile = flag.String("db", "/db/sqlite.db", "SQLite数据库文件路径")
-	
+
 	// Telegram相关
 	tgToken = flag.String("token", "", "Telegram Bot Token")
 	adminId = flag.Int64("admin", 0, "管理员的 Telegram Chat ID")
-	
+
 	// RSS相关
-	nsFeed = flag.String("feed", "https://rss.nodeseek.com", "NodeSeek RSS feed URL")
+	nsFeed        = flag.String("feed", "https://rss.nodeseek.com", "NodeSeek RSS feed URL")
 	fetchInterval = flag.Duration("interval", 10*time.Second, "RSS抓取间隔")
-	
+
 	// HTTP服务相关
 	port = flag.String("port", ":8080", "HTTP服务端口")
 )
