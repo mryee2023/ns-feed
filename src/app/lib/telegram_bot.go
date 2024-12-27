@@ -26,9 +26,11 @@ const (
 	cmdOff    = "/off"
 	cmdQuit   = "/quit"
 	cmdStatus = "/status"
+	cmdStart  = "/start"
 )
 
 var helpText = `
+/start 开始使用关键字通知
 /list 列出当前所有关键字
 /add 关键字1 关键字2 关键字3.... 增加新的关键字
 /delete 关键字1 关键字2 关键字3.... 删除关键字
@@ -63,6 +65,7 @@ var commandHandlers = map[string]CommandHandler{
 	cmdOn:     handleOn,
 	cmdOff:    handleOff,
 	cmdQuit:   handleQuit,
+	cmdStart:  handleStart,
 }
 
 func InitTgBotListen(cnf *config.Config) {
@@ -285,6 +288,14 @@ func handleOff(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
 	db.UpdateSubscribe(sub)
 	msg := tgbotapi.NewMessage(sub.ChatId, "关键字通知已成功关闭")
 	return &msg, nil
+}
+
+func handleStart(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
+	sub.Status = "on"
+	db.UpdateSubscribe(sub)
+	msg := tgbotapi.NewMessage(sub.ChatId, "欢迎回来, 请用 /help 查看帮助说明。")
+	return &msg, nil
+
 }
 
 func handleQuit(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
