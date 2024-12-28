@@ -18,6 +18,7 @@ import (
 )
 
 const (
+	cmdFeed   = "/feed" //查看当前支持的RSS源
 	cmdHelp   = "/help"
 	cmdList   = "/list"
 	cmdAdd    = "/add"
@@ -31,9 +32,11 @@ const (
 
 var helpText = `
 /start 开始使用关键字通知
+/feed 查看当前支持的RSS源
+/help 查看帮助说明
 /list 列出当前所有关键字
-/add 关键字1 关键字2 关键字3.... 增加新的关键字
-/delete 关键字1 关键字2 关键字3.... 删除关键字
+/add feedId 关键字1 关键字2 关键字3.... 增加新的关键字
+/delete feedId  关键字1 关键字2 关键字3.... 删除关键字
 /on 开启关键字通知
 /off 关闭关键字通知
 /quit 退出关键字通知
@@ -59,6 +62,7 @@ type CommandHandler func(*db.Subscribe, []string) (*tgbotapi.MessageConfig, erro
 // 命令处理器映射
 var commandHandlers = map[string]CommandHandler{
 	cmdList:   handleList,
+	cmdFeed:   handleFeed,
 	cmdAdd:    handleAdd,
 	cmdDelete: handleDelete,
 	cmdHelp:   handleHelp,
@@ -157,7 +161,13 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 	}
 
 	msg, err := handler(subscriber, args)
-	if err != nil || msg == nil {
+	if err != nil {
+
+		errMsg := tgbotapi.NewMessage(subscriber.ChatId, err.Error())
+		sendMessage(&errMsg)
+		return
+	}
+	if msg == nil {
 		return
 	}
 
@@ -216,40 +226,90 @@ func sendMessage(msg *tgbotapi.MessageConfig) {
 
 // 命令处理函数
 func handleList(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
-	keywords := funk.UniqString(sub.KeywordsArray)
-	keywords = funk.FilterString(keywords, func(s string) bool {
-		return strings.TrimSpace(s) != ""
-	})
-	msg := tgbotapi.NewMessage(sub.ChatId, "当前关键字: "+strings.Join(keywords, " , "))
+
+	keys := db.ListSubscribeFeedConfig(sub.ChatId)
+	var sb strings.Builder
+	for k, v := range keys {
+		sb.WriteString(fmt.Sprintf("feed源: %s, 关键字: %s\n", k, strings.Join(v, " , ")))
+	}
+	msg := tgbotapi.NewMessage(sub.ChatId, "当前配置的关键字: \n"+sb.String())
+	return &msg, nil
+}
+
+// 命令处理函数
+func handleFeed(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
+
+	feeds := db.ListAllFeedConfig()
+	var feedId []string
+	for _, v := range feeds {
+		feedId = append(feedId, "名称: "+v.Name+" , 标识: **"+v.FeedId+"**")
+	}
+	msg := tgbotapi.NewMessage(sub.ChatId, "当前支持的feed源: \n"+strings.Join(feedId, "\n"))
 	return &msg, nil
 }
 
 func handleAdd(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, error) {
-	if len(args) == 0 {
-		return nil, errors.New("请输入你要添加的关键字, 例如: /add keyword")
+	if len(args) == 0 || len(args) == 1 {
+		return nil, errors.New("请输入你要添加的关键字, 例如: /add feedId keyword")
 	}
+
+	feedId := args[0]
+
+	// 检查是否存在该feedId
+	v := db.GetFeedConfigWithFeedId(feedId)
+	if v.ID == 0 {
+		return nil, errors.New("该feedId不存在, 请先使用 /feed 查看支持的feedId")
+	}
+
+	args = args[1:]
 
 	args = funk.Map(args, func(s string) string {
 		return strings.Trim(strings.TrimSpace(s), "{}")
 	}).([]string)
 
-	sub.KeywordsArray = append(sub.KeywordsArray, args...)
-	db.UpdateSubscribe(sub)
+	//更新db
+	exists := db.ListSubscribeFeedWith(sub.ChatId, feedId)
+	if exists.ID > 0 {
+		//取一下并集
+		args = append(args, exists.KeywordsArray...)
+		args = funk.UniqString(args)
+		exists.KeywordsArray = args
+	} else {
+		exists = db.SubscribeConfig{
+			ChatId:        sub.ChatId,
+			KeywordsArray: args,
+			FeedId:        feedId,
+		}
+	}
+	db.AddSubscribeConfig(exists)
 
 	msg := tgbotapi.NewMessage(sub.ChatId, "关键字添加成功 "+strings.Join(args, " , "))
 	return &msg, nil
 }
 
 func handleDelete(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, error) {
-	if len(args) == 0 {
-		return nil, errors.New("请输入你要删除的关键字, 例如: /delete keyword")
+	if len(args) == 0 || len(args) == 1 {
+		return nil, errors.New("请输入你要删除的关键字, 例如: /delete feedId keyword")
+	}
+
+	feedId := args[0]
+
+	// 检查是否存在该feedId
+	v := db.GetFeedConfigWithFeedId(feedId)
+	if v.ID == 0 {
+		return nil, errors.New("该feedId不存在, 请先使用 /feed 查看支持的feedId")
+	}
+
+	exists := db.ListSubscribeFeedWith(sub.ChatId, feedId)
+	if exists.ID == 0 {
+		return nil, errors.New("您还未添加过该feedId的关键字")
 	}
 
 	deletes := make(map[string]struct{})
 	var delWords []string
 
 	for _, word := range args {
-		for _, v := range sub.KeywordsArray {
+		for _, v := range exists.KeywordsArray {
 			if strings.ToLower(v) == strings.ToLower(word) {
 				deletes[v] = struct{}{}
 				delWords = append(delWords, word)
@@ -258,14 +318,14 @@ func handleDelete(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, er
 	}
 
 	var newWords []string
-	for _, v := range sub.KeywordsArray {
+	for _, v := range exists.KeywordsArray {
 		if _, ok := deletes[v]; !ok {
 			newWords = append(newWords, v)
 		}
 	}
 
-	sub.KeywordsArray = newWords
-	db.UpdateSubscribe(sub)
+	exists.KeywordsArray = newWords
+	db.AddSubscribeConfig(exists)
 
 	msg := tgbotapi.NewMessage(sub.ChatId, "关键字删除成功 "+strings.Join(delWords, " , "))
 	return &msg, nil
