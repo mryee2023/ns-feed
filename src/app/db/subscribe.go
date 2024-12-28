@@ -72,6 +72,14 @@ func InitDB(dbPath string) error {
 		return err
 	}
 
+	//默认添加ns
+	var ns = FeedConfig{
+
+		Name:    "NodeSeek",
+		FeedUrl: "https://rss.nodeseek.com",
+		FeedId:  "ns",
+	}
+	AddOrUpdateFeed(ns)
 	return nil
 }
 
