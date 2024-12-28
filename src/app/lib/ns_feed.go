@@ -114,6 +114,13 @@ func (f *NsFeed) sendMessage(c *MessageOption, feedName string, items []*gofeed.
 	for _, item := range items {
 		exists := db.GetNotifyHistory(c.ChatId, item.Link) != nil
 		if hasKeyword(item.Title, c.Keywords) && !exists {
+
+			//f.logger.WithFields(
+			//	logx.Field("chatId", c.ChatId),
+			//	logx.Field("feedName", feedName),
+			//	logx.Field("title", item.Title),
+			//	logx.Field("keywords", c.Keywords)).Infow("需要发送消息")
+
 			db.AddNotifyHistory(&db.NotifyHistory{
 				ChatId: c.ChatId,
 				Url:    item.Link,
@@ -127,7 +134,8 @@ func (f *NsFeed) sendMessage(c *MessageOption, feedName string, items []*gofeed.
 						item.Link),
 					ChatId: &c.ChatId,
 				}
-				f.Add(msg)
+
+				f.bot.Notify(msg)
 			}
 		}
 	}
@@ -138,6 +146,7 @@ var isRunning bool
 
 func (f *NsFeed) fetchRss() {
 	if isRunning {
+		fmt.Println("fetch rss is running")
 		return
 	}
 	isRunning = true
@@ -182,43 +191,34 @@ func (f *NsFeed) fetchRss() {
 
 	subscribes := db.ListSubscribes()
 	subscribes = funk.Filter(subscribes, func(c *db.Subscribe) bool {
-		return c.Status == "on"
+		c.Status = strings.ToLower(c.Status)
+		c.Status = strings.TrimSpace(c.Status)
+		return c.Status == "on" || c.Status == ""
 	}).([]*db.Subscribe)
 
 	var swg sync.WaitGroup
 
-	for fid, items := range feedItems {
+	for _, subscribe := range subscribes {
+		subscribe := subscribe
 		swg.Add(1)
-		go func(feedId string, items []*gofeed.Item) {
+		go func() {
 			defer func() {
 				swg.Done()
+				rescue.Recover()
 			}()
-			for _, c := range subscribes {
-				subKeys := db.ListSubscribeFeedWith(c.ChatId, fid)
+			for fid, items := range feedItems {
+				subKeys := db.ListSubscribeFeedWith(subscribe.ChatId, fid)
 				if subKeys.ID == 0 {
 					continue
 				}
-				f.sendMessage(&MessageOption{
-					ChatId:   c.ChatId,
-					FeedName: feedId,
-					Keywords: subKeys.KeywordsArray,
-				}, feedId, items)
-			}
-		}(fid, items)
 
-		//for _, c := range subscribes {
-		//	subKeys := db.ListSubscribeFeedWith(c.ChatId, fid)
-		//	if subKeys.ID == 0 {
-		//		continue
-		//	}
-		//	c.KeywordsArray = subKeys.KeywordsArray
-		//	//wg.RunSafe(func() {
-		//	f.sendMessage(c, fid, items)
-		//	//})
-		//
-		//}
-		//swg.Done()
+				f.sendMessage(&MessageOption{
+					ChatId:   subscribe.ChatId,
+					FeedName: fid,
+					Keywords: subKeys.KeywordsArray,
+				}, fid, items)
+			}
+		}()
 	}
 	swg.Wait()
-
 }
