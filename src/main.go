@@ -156,6 +156,48 @@ func main() {
 		_, _ = writer.Write([]byte(`{"code":1000,"msg":"pong"}`))
 	})
 
+	http.HandleFunc("/api/feed", func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != "POST" {
+			writer.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if err := request.ParseForm(); err != nil {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		feedId := request.FormValue("feed_id")
+		feedUrl := request.FormValue("feed_url")
+		feedName := request.FormValue("feed_name")
+		if feedId == "" || feedUrl == "" {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		db.AddOrUpdateFeed(db.FeedConfig{
+			Name:    feedName,
+			FeedUrl: feedUrl,
+			FeedId:  feedId,
+		})
+
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"code":1000,"msg":"success"}`))
+	})
+
+	http.HandleFunc("/api/subscribe/trans", func(writer http.ResponseWriter, request *http.Request) {
+		// 转换订阅数据
+		//查询所有订阅者
+		subs := db.ListSubscribes()
+		for _, sub := range subs {
+			db.AddSubscribeConfig(db.SubscribeConfig{
+				ChatId:        sub.ChatId,
+				KeywordsArray: sub.KeywordsArray,
+				FeedId:        "node-seek",
+			})
+
+		}
+
+	})
+
 	log.Info("NodeSeek Feed服务启动成功")
 	bot.Notify(lib.NotifyMessage{Text: "✅ NodeSeek Feed服务已启动", ChatId: adminId})
 

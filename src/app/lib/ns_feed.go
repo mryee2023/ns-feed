@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/matoous/go-nanoid/v2"
 	"github.com/mmcdole/gofeed"
+	"github.com/thoas/go-funk"
 	"github.com/zeromicro/go-zero/core/collection"
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/rescue"
@@ -101,14 +103,9 @@ func hasKeyword(title string, keywords []string) bool {
 
 //var mutex sync.Mutex
 
-func (f *NsFeed) postToChannel(c *db.Subscribe, feed *gofeed.Feed) {
-	if len(c.Keywords) == 0 || c.Status == "off" {
-		return
-	}
-	//mutex.Lock()
-	//defer mutex.Unlock()
+func (f *NsFeed) sendMessage(c *db.Subscribe, feedName string, items []*gofeed.Item) {
 
-	for _, item := range feed.Items {
+	for _, item := range items {
 		exists := db.GetNotifyHistory(c.ChatId, item.Link) != nil
 		if hasKeyword(item.Title, c.KeywordsArray) && !exists {
 			db.AddNotifyHistory(&db.NotifyHistory{
@@ -118,7 +115,8 @@ func (f *NsFeed) postToChannel(c *db.Subscribe, feed *gofeed.Feed) {
 			})
 			if f.bot != nil {
 				msg := NotifyMessage{
-					Text: fmt.Sprintf("📢 *%s*\n\n🕐 %s\n\n👉 %s",
+					Text: fmt.Sprintf("📢 %s \n *%s*\n\n🕐 %s\n\n👉 %s",
+						feedName,
 						item.Title,
 						item.PublishedParsed.Add(time.Hour*8).Format("2006-01-02 15:04:05"),
 						item.Link),
@@ -128,31 +126,71 @@ func (f *NsFeed) postToChannel(c *db.Subscribe, feed *gofeed.Feed) {
 			}
 		}
 	}
+
 }
 
 func (f *NsFeed) fetchRss() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	fp := gofeed.NewParser()
-	feed, err := fp.ParseURLWithContext(f.svc.Config.NsFeed, ctx)
-	if err != nil {
-		f.logger.Errorw("fetch rss failed", logx.Field("err", err))
-		return
-	}
-	if feed == nil {
-		f.logger.Errorw("fetch rss failed", logx.Field("err", "feed is nil"))
-		return
-	}
 
+	feedCnf := db.ListAllFeedConfig()
+
+	if len(feedCnf) == 0 {
+		f.logger.Errorw("fetch rss failed", logx.Field("err", "feed config is empty"))
+		return
+	}
+	feedItems := make(map[string][]*gofeed.Item)
+	var mux sync.Mutex
 	var wg threading.RoutineGroup
-	Subscribes := SubCacheInstance().All()
-
-	for _, channel := range Subscribes {
-		channel := channel
+	for _, cnf := range feedCnf {
+		cnf := cnf
 		wg.RunSafe(func() {
-			f.postToChannel(channel, feed)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			fp := gofeed.NewParser()
+			feed, err := fp.ParseURLWithContext(cnf.FeedUrl, ctx)
+			if err != nil {
+				f.logger.Errorw("fetch rss failed", logx.Field("err", err))
+				return
+			}
+			if feed == nil {
+				f.logger.Errorw("fetch rss failed", logx.Field("err", "feed is nil"))
+				return
+			}
+			var items []*gofeed.Item
+			for _, item := range feed.Items {
+				items = append(items, item)
+				fmt.Println(cnf.FeedId, ",", item.Title, ",", item.Link)
+			}
+			mux.Lock()
+			feedItems[cnf.FeedId] = items
+			mux.Unlock()
 		})
 	}
 	wg.Wait()
+
+	subscribes := db.ListSubscribes()
+	subscribes = funk.Filter(subscribes, func(c *db.Subscribe) bool {
+		return c.Status == "on"
+	}).([]*db.Subscribe)
+
+	var swg sync.WaitGroup
+
+	for k, v := range feedItems {
+		swg.Add(1)
+		go func(feedId string, items []*gofeed.Item) {
+			defer func() {
+				swg.Done()
+			}()
+			for _, c := range subscribes {
+				subKeys := db.ListSubscribeFeedConfig(c.ChatId)
+				if words, ok := subKeys[feedId]; ok {
+					c.KeywordsArray = words
+					wg.RunSafe(func() {
+						f.sendMessage(c, feedId, items)
+					})
+				}
+			}
+		}(k, v)
+	}
+	swg.Wait()
 
 }

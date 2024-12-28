@@ -40,6 +40,7 @@ func (s *Subscribe) AfterFind(tx *gorm.DB) error {
 	if s.Keywords != "" {
 		return json.Unmarshal([]byte(s.Keywords), &s.KeywordsArray)
 	}
+
 	return nil
 }
 
@@ -66,7 +67,7 @@ func InitDB(dbPath string) error {
 	}
 
 	// Auto migrate the schema
-	err = db.AutoMigrate(&Subscribe{}, &NotifyHistory{})
+	err = db.AutoMigrate(&Subscribe{}, &NotifyHistory{}, &FeedConfig{}, &SubscribeConfig{})
 	if err != nil {
 		return err
 	}
