@@ -4,4 +4,4 @@ nsFeed: https://rss.nodeseek.com
 adminId: 415257783
 fetchTimeInterval: 10s
 accessKey: 123
-online: false
+online: true
