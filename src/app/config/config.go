@@ -30,6 +30,8 @@ type Config struct {
 	AdminId           int64        `yaml:"adminId"`
 	FetchTimeInterval string       `yaml:"fetchTimeInterval"` //抓取rss时间间隔
 	Subscribes        []*Subscribe `yaml:"channels"`
+	AccessKey         string       `yaml:"accessKey"` //访问密钥
+	Online            bool         `yaml:"online"`
 }
 
 func (c *Config) Storage(path string) {

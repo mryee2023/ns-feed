@@ -12,11 +12,11 @@ import (
 
 	"github.com/golang-module/carbon/v2"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/cast"
 	"github.com/zeromicro/go-zero/core/proc"
 	"github.com/zeromicro/go-zero/core/rescue"
 	"gopkg.in/yaml.v3"
 	"ns-rss/src/app"
+	"ns-rss/src/app/bot_http"
 	config2 "ns-rss/src/app/config"
 	"ns-rss/src/app/db"
 	"ns-rss/src/app/lib"
@@ -40,8 +40,6 @@ var (
 	// HTTP服务相关
 	port = flag.String("port", ":8080", "HTTP服务端口")
 )
-
-var bot lib.BotNotifier
 
 func getAbsolutePath() string {
 	exe, err := os.Executable()
@@ -119,45 +117,46 @@ func main() {
 	if *adminId == 0 {
 		log.Fatal("Admin chat ID is required")
 	}
-
+	app.SetConfig(&config)
 	// 初始化机器人
-	bot = lib.NewTelegramNotifier(*tgToken, cast.ToString(*adminId))
-	if bot == nil {
+
+	app.InitBot(tgToken, adminId)
+	if app.GetBotInstance() == nil {
 		log.Fatal("error: invalid bot platform")
 	}
 
 	// 设置关闭和恢复处理
 	proc.AddShutdownListener(func() {
-		bot.Notify(lib.NotifyMessage{Text: "⚠️ NodeSeek Feed服务已停止", ChatId: adminId})
+		app.GetBotInstance().Notify(lib.NotifyMessage{Text: "⚠️ NodeSeek Feed服务已停止", ChatId: adminId})
 		log.Info("service shutdown")
 	})
 
 	rescue.Recover(func() {
-		bot.Notify(lib.NotifyMessage{Text: "⚠️ NodeSeek Feed服务发生异常", ChatId: adminId})
+		app.GetBotInstance().Notify(lib.NotifyMessage{Text: "⚠️ NodeSeek Feed服务发生异常", ChatId: adminId})
 	})
 
 	// 初始化服务
 	lib.InitTgBotListen(&config)
 	svc := lib.NewServiceCtx(lib.TgBotInstance(), &config)
-	if *configFile != "" {
-		app.ConfigFilePath = *configFile
-	}
 
 	// 启动RSS抓取
 	go func() {
+		if !config.Online {
+			log.Info("NodeSeek Feed服务已离线")
+			return
+		}
 		feeder := lib.NewNsFeed(context.Background(), svc)
-		feeder.SetBot(bot)
+		feeder.SetBot(app.GetBotInstance())
 		feeder.Start()
 	}()
 
 	// 启动HTTP服务
-	http.HandleFunc("/ping", func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"code":1000,"msg":"pong"}`))
-	})
+	for k, v := range bot_http.RouteHandler {
+		http.HandleFunc(k, v)
+	}
 
 	log.Info("NodeSeek Feed服务启动成功")
-	bot.Notify(lib.NotifyMessage{Text: "✅ NodeSeek Feed服务已启动", ChatId: adminId})
+	app.GetBotInstance().Notify(lib.NotifyMessage{Text: "✅ NodeSeek Feed服务已启动", ChatId: adminId})
 
 	log.Infof("Service start success, Listen On %s", *port)
 	if err := http.ListenAndServe(*port, nil); err != nil {

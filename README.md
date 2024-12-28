@@ -4,6 +4,7 @@
 NodeSeek Feed 关键字通知机器人是一个Telegram机器人，用于监控NodeSeek RSS指定关键字，并将文章标题、链接、发布时间等信息推送到指定群组、频道或个人。
 
 
+
 ### 2. 使用方法
 
 #### 2.1 添加机器人
@@ -12,10 +13,11 @@ NodeSeek Feed 关键字通知机器人是一个Telegram机器人，用于监控N
 
 #### 2.2 设置关键字
 - 发送 `/start` 启动机器人
+- 发送 `/feed` 查看当前已配置的RSS源 
 - 发送 `/help` 查看帮助
-- 发送 `/add` 添加关键字
+- 发送 `/add` 添加关键字 格式：`/add feedId 关键字1 关键字2 ...`
 - 发送 `/list` 查看关键字列表
-- 发送 `/delete` 删除关键字
+- 发送 `/delete` 删除关键字 格式：`/delete feedId 关键字1 关键字2 ...`
 - 发送 `/on` 启用关键字通知
 - 发送 `/off` 关闭关键字通知
 - 发送 `/quit` 退出机器人通知
@@ -48,5 +50,39 @@ tgToken: your_telegram_bot_token # 机器人Token
 nsFeed: https://rss.nodeseek.com
 adminId: 0 # 管理员ID,系统启动/退出时会发送通知，执行/status命令时可发送汇总数据
 fetchTimeInterval: 10s   # RSS抓取时间间隔,最小10s
+accessKey: your_access_key # api访问密钥
+online: true # 是否是上线模式,false时不会抓取rss信息，仅提供api接口
+```
 
+### 6. API接口
+
+#### 6.1 检测服务是否正常
+```shell
+curl -X GET http://your_ip:8080/api/ping
+```
+
+#### 6.2 获取当前配置的rss源
+```shell
+curl --location 'http://your_ip:8080/api/feed' \
+--header 'accessKey: your_accessKey'
+```
+
+
+#### 6.3 添加新的rss源
+```shell
+curl --location 'http://localhost:8080/api/feed' \
+--header 'accessKey: your_accessKey' \
+--header 'Content-Type: application/x-www-form-urlencoded' \
+--data-urlencode 'feed_id=ns' \
+--data-urlencode 'feed_name=NodeSeek' \
+--data-urlencode 'feed_url=https://rss.nodeseek.com'
+```
+
+
+#### 6.4 发送通知给订阅者(慎用)
+```shell
+curl --location 'http://your_ip:8080/api/notice' \
+--header 'accessKey: your_accessKey' \
+--header 'Content-Type: application/x-www-form-urlencoded' \
+--data-urlencode 'text=机器人版本更新，支持linux.do rss源订阅，请输入/help查看'
 ```

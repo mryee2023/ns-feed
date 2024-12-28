@@ -1,5 +1,7 @@
 port: :8080
-tgToken: your_tg_token
+tgToken: 7727116717:AAH31RbD5ygRkuWGO1EaCcfKybAoirykxaY
 nsFeed: https://rss.nodeseek.com
-adminId: 0000
+adminId: 415257783
 fetchTimeInterval: 10s
+accessKey: 123
+online: false
