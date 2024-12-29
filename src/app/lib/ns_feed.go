@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dlclark/regexp2"
 	"github.com/matoous/go-nanoid/v2"
 	"github.com/mmcdole/gofeed"
 	"github.com/thoas/go-funk"
@@ -93,7 +94,16 @@ func (f *NsFeed) Start() {
 func hasKeyword(title string, keywords []string) bool {
 	for _, keyword := range keywords {
 		keyword = strings.Trim(keyword, "{}")
-		if strings.Contains(strings.ToLower(title), strings.ToLower(keyword)) {
+		//if strings.Contains(strings.ToLower(title), strings.ToLower(keyword)) {
+		//	return true
+		//}
+		got := ParseExpression(keyword)
+		re, err := regexp2.Compile(got, 0)
+		if err != nil {
+			continue
+		}
+		isMatch, _ := re.MatchString(title)
+		if isMatch {
 			return true
 		}
 	}

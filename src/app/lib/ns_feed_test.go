@@ -38,12 +38,20 @@ func Test_hasKeyword(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "test1",
+			name: "存量关键字匹配",
 			args: args{
 				title:    "剩余价值➕push出港仔CMHK NAT 续费 13.88u/月",
 				keywords: []string{"bgp", "探针", "bgp.gd", "港仔", "mk", "boil", "zgo", "lala", "bage"},
 			},
 			want: true,
+		},
+		{
+			name: "逻辑运算符关键字匹配",
+			args: args{
+				title:    "剩余价值➕push出港仔CMHK NAT 续费 13.88u/月",
+				keywords: []string{"bgp", "探针", "bgp.gd", "港仔~NAT", "mk", "boil", "zgo", "lala", "bage"},
+			},
+			want: false,
 		},
 	}
 	for _, tt := range tests {
