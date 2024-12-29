@@ -94,6 +94,8 @@ func (f *NsFeed) Start() {
 func hasKeyword(title string, keywords []string) bool {
 	for _, keyword := range keywords {
 		keyword = strings.Trim(keyword, "{}")
+		keyword = strings.ToLower(keyword)
+		title = strings.ToLower(title)
 		//if strings.Contains(strings.ToLower(title), strings.ToLower(keyword)) {
 		//	return true
 		//}

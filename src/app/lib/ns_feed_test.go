@@ -69,6 +69,14 @@ func Test_hasKeyword(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "逻辑运算符关键字匹配_斯巴达_3",
+			args: args{
+				title:    "油管 YouTube Premium家庭组 任意区年66.99",
+				keywords: []string{"youtube"},
+			},
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
