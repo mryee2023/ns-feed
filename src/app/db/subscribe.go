@@ -31,6 +31,8 @@ func (s *Subscribe) BeforeSave(tx *gorm.DB) error {
 			return err
 		}
 		s.Keywords = string(keywords)
+	} else {
+		s.Keywords = ""
 	}
 	return nil
 }
