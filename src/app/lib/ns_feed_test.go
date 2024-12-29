@@ -53,6 +53,22 @@ func Test_hasKeyword(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "逻辑运算符关键字匹配_斯巴达_1",
+			args: args{
+				title:    "[收]斯巴达小鸡一个",
+				keywords: []string{"斯巴达"},
+			},
+			want: true,
+		},
+		{
+			name: "逻辑运算符关键字匹配_斯巴达_2",
+			args: args{
+				title:    "[收]斯巴达小鸡一个",
+				keywords: []string{"斯巴达~收"},
+			},
+			want: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
