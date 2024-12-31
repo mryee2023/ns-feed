@@ -2,5 +2,5 @@ bin
 .idea
 /src/etc/config.yaml
 build
-db
+db/ns.db
 /ns-rss
