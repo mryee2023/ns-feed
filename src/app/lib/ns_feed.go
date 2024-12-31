@@ -3,6 +3,7 @@ package lib
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -101,14 +102,28 @@ func hasKeyword(title string, keywords []string) bool {
 
 //var mutex sync.Mutex
 
+func removeHash(u string) (string, error) {
+	parsedUrl, err := url.Parse(u)
+	if err != nil {
+		return "", err
+	}
+	parsedUrl.Fragment = ""
+	return parsedUrl.String(), nil
+}
+
 func (f *NsFeed) postToChannel(c *db.Subscribe, feed *gofeed.Feed) {
-	if len(c.Keywords) == 0 || c.Status == "off" {
+	if len(c.Keywords) == 0 || c.Status != "on" {
 		return
 	}
 	//mutex.Lock()
 	//defer mutex.Unlock()
 
 	for _, item := range feed.Items {
+
+		item.Link, _ = removeHash(item.Link)
+		if item.Link == "" {
+			continue
+		}
 		exists := db.GetNotifyHistory(c.ChatId, item.Link) != nil
 		if hasKeyword(item.Title, c.KeywordsArray) && !exists {
 			db.AddNotifyHistory(&db.NotifyHistory{
