@@ -25,14 +25,15 @@ NodeSeek Feed 关键字通知机器人是一个Telegram机器人，用于监控N
 
 ### 3. 其他
 
-关键字语法支持：`+` 代表与，`~` 代表非，`|` 代表或
+关键字语法支持：`+` 代表与，`|` 代表或 ,`~` 代表排除
 
-例如：`/add ns linux ~windows` 表示订阅NodeSeek RSS中包含`linux`关键字，但不包含`windows`关键字
+例如：`/add ns linux|windows` 表示订阅NodeSeek RSS中包含`linux`关键字，或包含`windows`关键字
 
 `/add ns iPhone+频道` 表示订阅NodeSeek RSS中包含`iPhone`关键字，同时包含`频道`关键字的标题
 
+`/add ns 斯巴达~收` 表示订阅NodeSeek RSS中包含`斯巴达`关键字，但不包含`收`关键字的标题
 
-
++|~的关键字之间不能包含空格，否则会被识别为多个关键字，目前也不支持组合关键字，例如：`/add ns iPhone+频道~收` 会被识别为`iPhone`、`频道~收`两个关键字
 
 
 ### 4. 安装说明

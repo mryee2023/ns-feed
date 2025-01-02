@@ -3,10 +3,12 @@ package lib
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/dlclark/regexp2"
 	"github.com/matoous/go-nanoid/v2"
 	"github.com/mmcdole/gofeed"
 	"github.com/thoas/go-funk"
@@ -93,7 +95,18 @@ func (f *NsFeed) Start() {
 func hasKeyword(title string, keywords []string) bool {
 	for _, keyword := range keywords {
 		keyword = strings.Trim(keyword, "{}")
-		if strings.Contains(strings.ToLower(title), strings.ToLower(keyword)) {
+		keyword = strings.ToLower(keyword)
+		title = strings.ToLower(title)
+		//if strings.Contains(strings.ToLower(title), strings.ToLower(keyword)) {
+		//	return true
+		//}
+		got := ParseExpression(keyword)
+		re, err := regexp2.Compile(got, 0)
+		if err != nil {
+			continue
+		}
+		isMatch, _ := re.MatchString(title)
+		if isMatch {
 			return true
 		}
 	}
@@ -107,19 +120,25 @@ type MessageOption struct {
 	Keywords []string
 }
 
-//var mutex sync.Mutex
+func removeHash(u string) (string, error) {
+	parsedUrl, err := url.Parse(u)
+	if err != nil {
+		return "", err
+	}
+	// 将锚点部分设置为空
+	parsedUrl.Fragment = ""
+	return parsedUrl.String(), nil
+}
 
 func (f *NsFeed) sendMessage(c *MessageOption, feedName string, items []*gofeed.Item) {
 
 	for _, item := range items {
+		item.Link, _ = removeHash(item.Link)
+		if item.Link == "" {
+			continue
+		}
 		exists := db.GetNotifyHistory(c.ChatId, item.Link) != nil
 		if hasKeyword(item.Title, c.Keywords) && !exists {
-
-			//f.logger.WithFields(
-			//	logx.Field("chatId", c.ChatId),
-			//	logx.Field("feedName", feedName),
-			//	logx.Field("title", item.Title),
-			//	logx.Field("keywords", c.Keywords)).Infow("需要发送消息")
 
 			db.AddNotifyHistory(&db.NotifyHistory{
 				ChatId: c.ChatId,

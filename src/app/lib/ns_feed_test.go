@@ -38,10 +38,42 @@ func Test_hasKeyword(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "test1",
+			name: "存量关键字匹配",
 			args: args{
 				title:    "剩余价值➕push出港仔CMHK NAT 续费 13.88u/月",
 				keywords: []string{"bgp", "探针", "bgp.gd", "港仔", "mk", "boil", "zgo", "lala", "bage"},
+			},
+			want: true,
+		},
+		{
+			name: "逻辑运算符关键字匹配",
+			args: args{
+				title:    "剩余价值➕push出港仔CMHK NAT 续费 13.88u/月",
+				keywords: []string{"bgp", "探针", "bgp.gd", "港仔~NAT", "mk", "boil", "zgo", "lala", "bage"},
+			},
+			want: false,
+		},
+		{
+			name: "逻辑运算符关键字匹配_斯巴达_1",
+			args: args{
+				title:    "[收]斯巴达小鸡一个",
+				keywords: []string{"斯巴达"},
+			},
+			want: true,
+		},
+		{
+			name: "逻辑运算符关键字匹配_斯巴达_2",
+			args: args{
+				title:    "[收]斯巴达小鸡一个",
+				keywords: []string{"斯巴达~收"},
+			},
+			want: false,
+		},
+		{
+			name: "逻辑运算符关键字匹配_斯巴达_3",
+			args: args{
+				title:    "油管 YouTube Premium家庭组 任意区年66.99",
+				keywords: []string{"youtube"},
 			},
 			want: true,
 		},
