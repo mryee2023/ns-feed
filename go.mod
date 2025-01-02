@@ -1,6 +1,6 @@
 module ns-rss
 
-go 1.21
+go 1.20
 
 require (
 	github.com/dlclark/regexp2 v1.11.4
@@ -8,6 +8,7 @@ require (
 	github.com/golang-module/carbon/v2 v2.4.1
 	github.com/matoous/go-nanoid/v2 v2.1.0
 	github.com/mmcdole/gofeed v1.3.0
+	github.com/pocketbase/pocketbase v0.21.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cast v1.7.0
 	github.com/stretchr/testify v1.9.0
