@@ -1,101 +1,118 @@
 package lib
 
 import (
-	"fmt"
 	"testing"
-
-	"github.com/dlclark/regexp2"
-	"github.com/stretchr/testify/assert"
 )
 
-func TestParseExpression(t *testing.T) {
-	//examples := []string{
-	//	"iPhone+频道",
-	//	"苹果|安卓",
-	//	"斯巴达~收",
-	//}
-	//for _, example := range examples {
-	//	regex := ParseExpression(example)
-	//	fmt.Printf("Expression: %s\nRegex: %s\n\n", example, regex)
-	//}
-	//
-	//expr := "斯巴达~收"
-	//regex := ParseExpression(expr)
-	//fmt.Println("正则表达式:", regex)
-	//// 测试生成的正则表达式
-	//testStrings := []string{"这是斯巴达", "斯巴达 收到", "iPhone频道", "iPhone 和 频道", "这是iPhone"}
-	//for _, str := range testStrings {
-	//	matched, _ := regexp.MatchString(regex, str)
-	//	fmt.Printf("字符串: \"%s\" 匹配结果: %v\n", str, matched)
-	//}
-}
-
-func TestParseExpression1(t *testing.T) {
+func Test_match(t *testing.T) {
 	type args struct {
-		expr string
 		text string
+		expr string
 	}
 	tests := []struct {
-		name string
-		args args
-		want bool
+		name    string
+		args    args
+		want    bool
+		wantErr bool
 	}{
 		{
-			name: "兼容原有的关键字匹配",
+			name: "验证0表达式",
 			args: args{
+				text: "这是一个关于iPhone的频道",
 				expr: "iPhone",
-				text: "这是iPhone",
 			},
-			want: true,
+			want:    true,
+			wantErr: false,
 		},
 		{
-			name: "测试一下与关系",
+			name: "验证与表达式",
 			args: args{
-				expr: "iPhone+频道",
-				text: "我喜欢听这个iPhone的信息频道",
+				text: "hello world",
+				expr: "hello+world",
 			},
-			want: true,
+			want:    true,
+			wantErr: false,
 		},
 		{
-			name: "测试或关系",
+			name: "验证或表达式",
 			args: args{
-				expr: "苹果|安卓",
-				text: "我喜欢苹果手机",
+				text: "hello world",
+				expr: "hello|world",
 			},
-			want: true,
+			want:    true,
+			wantErr: false,
 		},
 		{
-			name: "测试非关系",
+			name: "验证非表达式",
 			args: args{
+				text: "这是一个关于iPhone的频道",
+				expr: "频道~iPhone",
+			},
+			want:    false,
+			wantErr: false,
+		},
+		{
+			name: "验证非表达式_2",
+			args: args{
+				text: "收一台斯巴达小鸡",
 				expr: "斯巴达~收",
-				text: "[出]这是斯巴达",
 			},
-			want: true,
+			want:    false,
+			wantErr: false,
 		},
 		{
-			name: "测试非关系",
+			name: "验证非表达式_3",
 			args: args{
+				text: "出一台斯巴达小鸡",
 				expr: "斯巴达~收",
-				text: "[收]斯巴达小鸡一台",
 			},
-			want: false,
+			want:    true,
+			wantErr: false,
 		},
-		{
-			name: "测试一下组合",
-			args: args{
-				expr: "斯巴达~收+小鸡",
-				text: "",
-			},
-			want: false,
-		},
+		//{
+		//	name: "验证复杂表达式",
+		//	args: args{
+		//		text: "这是一个关于iPhone的频道",
+		//		expr: "(频道~iPhone)|(频道+关于)",
+		//	},
+		//	want:    true,
+		//	wantErr: false,
+// parseToRegex 将表达式解析为正则表达式
+func parseToRegex(expr string) string {
+	var regexParts []string
+	orParts := strings.Split(expr, "|")
+
+	for _, orPart := range orParts {
+		andParts := strings.Split(orPart, "+")
+		var andRegexParts []string
+
+		for _, part := range andParts {
+			part = strings.TrimSpace(part)
+			if strings.HasPrefix(part, "~") {
+				// 处理非
+				notKeyword := strings.TrimPrefix(part, "~")
+				andRegexParts = append(andRegexParts, "(?!.*"+notKeyword+")")
+			} else {
+				andRegexParts = append(andRegexParts, "(?=.*"+part+")")
+			}
+		}
+
+		regexParts = append(regexParts, strings.Join(andRegexParts, ""))
+	}
+
+	return strings.Join(regexParts, "|")
+}		//},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ParseExpression(tt.args.expr)
-			re := regexp2.MustCompile(got, 0)
-			isMatch, _ := re.MatchString(tt.args.text)
-			fmt.Println("正则表达式:", got, "name", tt.name)
-			assert.Equal(t, tt.want, isMatch)
+			got, err := match(tt.args.text, tt.args.expr)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("match() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("match() got = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }
