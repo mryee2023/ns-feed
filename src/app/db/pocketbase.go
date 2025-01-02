@@ -250,12 +250,12 @@ func createSubscribeConfigsCollection(app core.App) error {
 				Required: true,
 			},
 			&schema.SchemaField{
-				Name:     "keywords",
+				Name:     "feed_id",
 				Type:     schema.FieldTypeText,
 				Required: true,
 			},
 			&schema.SchemaField{
-				Name:     "feed_id",
+				Name:     "keywords",
 				Type:     schema.FieldTypeText,
 				Required: true,
 			},
