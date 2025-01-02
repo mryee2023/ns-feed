@@ -1,9 +1,12 @@
 package db
 
 import (
+	"errors"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/models"
+	"github.com/spf13/cast"
 )
 
 type NotifyHistory struct {
@@ -16,13 +19,16 @@ type NotifyHistory struct {
 
 // AddNotifyHistory creates a new notification history
 func AddNotifyHistory(nh *NotifyHistory) error {
-	collection := GetPB().Dao().FindCollectionByNameOrId("notify_histories")
+	collection, _ := GetPB().Dao().FindCollectionByNameOrId("notify_histories")
 	if collection == nil {
 		return errors.New("collection not found")
 	}
 
 	// Check if notification already exists
-	record, _ := GetPB().Dao().FindFirstRecord(collection, "chat_id = {} && url = {}", nh.ChatId, nh.Url)
+	record, _ := GetPB().Dao().FindFirstRecordByFilter("notify_histories", "chat_id = {:cid} && url = {:url}", dbx.Params{
+		"cid": nh.ChatId,
+		"url": nh.Url,
+	})
 	if record != nil {
 		return nil
 	}
@@ -38,34 +44,42 @@ func AddNotifyHistory(nh *NotifyHistory) error {
 
 // GetNotifyHistory retrieves a notification history by ChatId and Url
 func GetNotifyHistory(chatId int64, url string) *NotifyHistory {
-	collection := GetPB().Dao().FindCollectionByNameOrId("notify_histories")
+	collection, _ := GetPB().Dao().FindCollectionByNameOrId("notify_histories")
 	if collection == nil {
 		return nil
 	}
 
-	record, err := GetPB().Dao().FindFirstRecord(collection, "chat_id = {} && url = {}", chatId, url)
+	record, err := GetPB().Dao().FindFirstRecordByFilter("notify_histories", "chat_id = {:chatId} && url = {:url}",
+		dbx.Params{
+			"chatId": chatId,
+			"url":    url,
+		},
+	)
 	if err != nil {
 		return nil
 	}
 
 	nh := &NotifyHistory{
 		ID:        record.Id,
-		ChatId:    record.GetInt("chat_id"),
+		ChatId:    cast.ToInt64(record.GetInt("chat_id")),
 		Url:       record.GetString("url"),
 		Title:     record.GetString("title"),
-		CreatedAt: record.GetDateTime("created"),
+		CreatedAt: record.GetDateTime("created").Time(),
 	}
 
 	return nh
 }
 
 func GetNotifyCountByDateTime(start, end time.Time) int64 {
-	collection := GetPB().Dao().FindCollectionByNameOrId("notify_histories")
+	collection, _ := GetPB().Dao().FindCollectionByNameOrId("notify_histories")
 	if collection == nil {
 		return 0
 	}
-
-	records, err := GetPB().Dao().FindRecordsByExpr(collection, "created >= {} && created < {}", start, end)
+	exp := dbx.NewExp("created >= {:a} && created < {:b}", dbx.Params{
+		"a": start,
+		"b": end,
+	})
+	records, err := GetPB().Dao().FindRecordsByExpr("notify_histories", exp)
 	if err != nil {
 		return 0
 	}

@@ -257,7 +257,7 @@ func handleAdd(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, error
 
 	// 检查是否存在该feedId
 	v := db.GetFeedConfigWithFeedId(feedId)
-	if v.ID == 0 {
+	if v.ID == "" {
 		return nil, errors.New("该feedId不存在, 请先使用 /feed 查看支持的feedId")
 	}
 
@@ -269,7 +269,7 @@ func handleAdd(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, error
 
 	//更新db
 	exists := db.ListSubscribeFeedWith(sub.ChatId, feedId)
-	if exists.ID > 0 {
+	if exists.ID != "" {
 		//取一下并集
 		args = append(args, exists.KeywordsArray...)
 		args = funk.UniqString(args)
@@ -296,12 +296,12 @@ func handleDelete(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, er
 
 	// 检查是否存在该feedId
 	v := db.GetFeedConfigWithFeedId(feedId)
-	if v.ID == 0 {
+	if v.ID == "" {
 		return nil, errors.New("该feedId不存在, 请先使用 /feed 查看支持的feedId")
 	}
 
 	exists := db.ListSubscribeFeedWith(sub.ChatId, feedId)
-	if exists.ID == 0 {
+	if exists.ID == "" {
 		return nil, errors.New("您还未添加过该feedId的关键字")
 	}
 

@@ -227,7 +227,7 @@ func (f *NsFeed) fetchRss() {
 			}()
 			for fid, items := range feedItems {
 				subKeys := db.ListSubscribeFeedWith(subscribe.ChatId, fid)
-				if subKeys.ID == 0 {
+				if subKeys.ID == "" {
 					continue
 				}
 

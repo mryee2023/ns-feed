@@ -3,7 +3,8 @@ package db
 import (
 	"errors"
 	"log"
-	"time"
+	"path/filepath"
+	"sync"
 
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
@@ -11,57 +12,83 @@ import (
 	"github.com/pocketbase/pocketbase/models/schema"
 )
 
-var pb *pocketbase.PocketBase
+var (
+	pb               *pocketbase.PocketBase
+	initOnce         sync.Once
+	collectionsReady chan struct{}
+	initialized      bool
+)
+
+func init() {
+	collectionsReady = make(chan struct{})
+}
 
 // InitPocketBase initializes the PocketBase instance
 func InitPocketBase(dbPath string) error {
-	pb = pocketbase.New()
-
-	// 配置数据库路径
-	pb.RootCmd.SetArgs([]string{"serve", "--dir", dbPath})
-
-	// 创建必要的集合
-	pb.OnBeforeServe().Add(func(e *core.ServeEvent) error {
-		app := e.App
-		collections := []func(app core.App) error{
-			createSubscribesCollection,
-			createNotifyHistoriesCollection,
-			createFeedConfigsCollection,
-			createSubscribeConfigsCollection,
+	var initErr error
+	initOnce.Do(func() {
+		// 如果路径以 pb_data 结尾，直接使用
+		// 否则，在路径下创建 pb_data 目录
+		if filepath.Base(dbPath) != "pb_data" {
+			dbPath = filepath.Join(dbPath, "pb_data")
 		}
 
-		for _, createCollection := range collections {
-			if err := createCollection(app); err != nil {
-				return err
+		pb = pocketbase.New()
+
+		// 配置数据库路径
+		pb.RootCmd.SetArgs([]string{"serve", "--dir", dbPath})
+
+		// 创建必要的集合
+		pb.OnBeforeServe().Add(func(e *core.ServeEvent) error {
+			defer close(collectionsReady) // 标记集合创建完成
+
+			app := e.App
+			collections := []func(app core.App) error{
+				createSubscribesCollection,
+				createNotifyHistoriesCollection,
+				createFeedConfigsCollection,
+				createSubscribeConfigsCollection,
 			}
-		}
 
-		// 默认添加 NodeSeek feed
-		collection := app.Dao().FindCollectionByNameOrId("feed_configs")
-		if collection != nil {
-			record, _ := app.Dao().FindFirstRecord(collection, "feed_id = {}", "ns")
-			if record == nil {
-				record = models.NewRecord(collection)
-				record.Set("name", "NodeSeek")
-				record.Set("feed_url", "https://rss.nodeseek.com")
-				record.Set("feed_id", "ns")
-				if err := app.Dao().SaveRecord(record); err != nil {
-					return err
+			for _, createCollection := range collections {
+				if err := createCollection(app); err != nil {
+					if err.Error() != "already exists" {
+						initErr = err
+						return err
+					}
 				}
 			}
-		}
 
-		return nil
+			initialized = true
+			return nil
+		})
+
+		// 启动 PocketBase
+		go func() {
+			if err := pb.Start(); err != nil {
+				if err.Error() != "server closed" {
+					log.Fatal("Failed to start PocketBase:", err)
+				}
+			}
+		}()
 	})
 
-	// 启动 PocketBase
-	go func() {
-		if err := pb.Start(); err != nil {
-			log.Fatal("Failed to start PocketBase:", err)
-		}
-	}()
+	if initErr != nil {
+		return initErr
+	}
+
+	// 等待初始化完成
+	<-collectionsReady
+	if !initialized {
+		return errors.New("failed to initialize PocketBase")
+	}
 
 	return nil
+}
+
+// WaitForCollections 等待集合创建完成
+func WaitForCollections() {
+	<-collectionsReady
 }
 
 // MigrateFromSQLite migrates data from SQLite to PocketBase
@@ -69,11 +96,17 @@ func MigrateFromSQLite(oldDbPath string) error {
 	if pb == nil {
 		return errors.New("PocketBase instance not initialized")
 	}
+	WaitForCollections()
 	return MigrateData(oldDbPath, pb)
 }
 
 // createSubscribesCollection creates the subscribes collection schema
 func createSubscribesCollection(app core.App) error {
+	// 检查集合是否已存在
+	if existing, _ := app.Dao().FindCollectionByNameOrId("subscribes"); existing != nil {
+		return errors.New("already exists")
+	}
+
 	collection := &models.Collection{
 		Name:       "subscribes",
 		Type:       models.CollectionTypeBase,
@@ -117,6 +150,11 @@ func createSubscribesCollection(app core.App) error {
 
 // createNotifyHistoriesCollection creates the notify_histories collection schema
 func createNotifyHistoriesCollection(app core.App) error {
+	// 检查集合是否已存在
+	if existing, _ := app.Dao().FindCollectionByNameOrId("notify_histories"); existing != nil {
+		return errors.New("already exists")
+	}
+
 	collection := &models.Collection{
 		Name:       "notify_histories",
 		Type:       models.CollectionTypeBase,
@@ -154,6 +192,11 @@ func createNotifyHistoriesCollection(app core.App) error {
 
 // createFeedConfigsCollection creates the feed_configs collection schema
 func createFeedConfigsCollection(app core.App) error {
+	// 检查集合是否已存在
+	if existing, _ := app.Dao().FindCollectionByNameOrId("feed_configs"); existing != nil {
+		return errors.New("already exists")
+	}
+
 	collection := &models.Collection{
 		Name:       "feed_configs",
 		Type:       models.CollectionTypeBase,
@@ -187,6 +230,11 @@ func createFeedConfigsCollection(app core.App) error {
 
 // createSubscribeConfigsCollection creates the subscribe_configs collection schema
 func createSubscribeConfigsCollection(app core.App) error {
+	// 检查集合是否已存在
+	if existing, _ := app.Dao().FindCollectionByNameOrId("subscribe_configs"); existing != nil {
+		return errors.New("already exists")
+	}
+
 	collection := &models.Collection{
 		Name:       "subscribe_configs",
 		Type:       models.CollectionTypeBase,
@@ -199,6 +247,11 @@ func createSubscribeConfigsCollection(app core.App) error {
 			&schema.SchemaField{
 				Name:     "chat_id",
 				Type:     schema.FieldTypeNumber,
+				Required: true,
+			},
+			&schema.SchemaField{
+				Name:     "keywords",
+				Type:     schema.FieldTypeText,
 				Required: true,
 			},
 			&schema.SchemaField{
@@ -217,5 +270,8 @@ func createSubscribeConfigsCollection(app core.App) error {
 
 // GetPB returns the PocketBase instance
 func GetPB() *pocketbase.PocketBase {
+	if !initialized {
+		log.Fatal("PocketBase not initialized")
+	}
 	return pb
 }

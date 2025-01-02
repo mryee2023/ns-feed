@@ -27,9 +27,9 @@ var (
 	configFile = flag.String("f", "", "配置文件路径")
 
 	// 数据库相关
-	dbFile = flag.String("db", "/db/sqlite.db", "SQLite数据库文件路径")
-	newDbFile = flag.String("new-db", "/db/pocketbase.db", "PocketBase数据库文件路径")
-	migrate = flag.Bool("migrate", false, "是否进行数据迁移")
+	dbPath    = flag.String("db", "./data", "PocketBase 数据目录路径（会在此目录下创建 pb_data 子目录）")
+	oldDbFile = flag.String("old-db", "", "旧的 SQLite 数据库文件路径（仅用于数据迁移）")
+	migrate   = flag.Bool("migrate", false, "是否进行数据迁移")
 
 	// Telegram相关
 	tgToken = flag.String("token", "", "Telegram Bot Token")
@@ -76,14 +76,14 @@ func main() {
 	// 如果是迁移模式
 	if *migrate {
 		log.Info("Starting data migration...")
-		
+
 		// 初始化 PocketBase
-		if err := db.InitPocketBase(*newDbFile); err != nil {
+		if err := db.InitPocketBase(*dbPath); err != nil {
 			log.Fatalf("Failed to initialize PocketBase: %v", err)
 		}
 
 		// 执行数据迁移
-		if err := db.MigrateFromSQLite(*dbFile); err != nil {
+		if err := db.MigrateFromSQLite(*oldDbFile); err != nil {
 			log.Fatalf("Failed to migrate data: %v", err)
 		}
 
@@ -92,7 +92,7 @@ func main() {
 	}
 
 	// 初始化数据库
-	if err := db.InitDB(*dbFile); err != nil {
+	if err := db.InitPocketBase(*dbPath); err != nil {
 		log.Fatalf("init db failure:%v", err)
 	}
 

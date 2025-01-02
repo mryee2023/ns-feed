@@ -1,5 +1,12 @@
 package db
 
+import (
+	"errors"
+
+	"github.com/pocketbase/dbx"
+	"github.com/pocketbase/pocketbase/models"
+)
+
 type FeedConfig struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
@@ -8,12 +15,12 @@ type FeedConfig struct {
 }
 
 func ListAllFeedConfig() []FeedConfig {
-	collection := GetPB().Dao().FindCollectionByNameOrId("feed_configs")
+	collection, _ := GetPB().Dao().FindCollectionByNameOrId("feed_configs")
 	if collection == nil {
 		return nil
 	}
 
-	records, err := GetPB().Dao().FindRecordsByExpr(collection)
+	records, err := GetPB().Dao().FindRecordsByExpr("feed_configs")
 	if err != nil {
 		return nil
 	}
@@ -33,12 +40,14 @@ func ListAllFeedConfig() []FeedConfig {
 }
 
 func GetFeedConfigWithFeedId(feedId string) FeedConfig {
-	collection := GetPB().Dao().FindCollectionByNameOrId("feed_configs")
+	collection, _ := GetPB().Dao().FindCollectionByNameOrId("feed_configs")
 	if collection == nil {
 		return FeedConfig{}
 	}
 
-	record, err := GetPB().Dao().FindFirstRecord(collection, "feed_id = {}", feedId)
+	record, err := GetPB().Dao().FindFirstRecordByFilter("feed_configs", "feed_id = {:feedId}", dbx.Params{
+		"feedId": feedId,
+	})
 	if err != nil {
 		return FeedConfig{}
 	}
@@ -52,12 +61,14 @@ func GetFeedConfigWithFeedId(feedId string) FeedConfig {
 }
 
 func AddOrUpdateFeed(config FeedConfig) error {
-	collection := GetPB().Dao().FindCollectionByNameOrId("feed_configs")
+	collection, _ := GetPB().Dao().FindCollectionByNameOrId("feed_configs")
 	if collection == nil {
 		return errors.New("collection not found")
 	}
 
-	record, _ := GetPB().Dao().FindFirstRecord(collection, "feed_id = {}", config.FeedId)
+	record, _ := GetPB().Dao().FindFirstRecordByFilter("feed_configs", "feed_id = {:feedId}", dbx.Params{
+		"feedId": config.FeedId,
+	})
 	if record != nil {
 		// Update existing record
 		record.Set("name", config.Name)

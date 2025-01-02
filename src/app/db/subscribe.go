@@ -2,19 +2,21 @@ package db
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/models"
 )
 
 type Subscribe struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	ChatId        int64    `json:"chat_id"`
-	Keywords      string   `json:"keywords"`
-	KeywordsArray []string `json:"-"`
-	Status        string   `json:"status"`
-	Type          string   `json:"type"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	ChatId        int64     `json:"chat_id"`
+	Keywords      string    `json:"keywords"`
+	KeywordsArray []string  `json:"-"`
+	Status        string    `json:"status"`
+	Type          string    `json:"type"`
 	CreatedAt     time.Time `json:"created"`
 	UpdatedAt     time.Time `json:"updated"`
 }
@@ -48,13 +50,15 @@ func InitDB(dbPath string) error {
 
 // AddSubscribe creates a new subscription
 func AddSubscribe(sub *Subscribe) error {
-	collection := GetPB().Dao().FindCollectionByNameOrId("subscribes")
+	collection, _ := GetPB().Dao().FindCollectionByNameOrId("subscribes")
 	if collection == nil {
 		return errors.New("collection not found")
 	}
 
 	// Check if subscription already exists
-	record, _ := GetPB().Dao().FindFirstRecord(collection, "chat_id = {}", sub.ChatId)
+	record, _ := GetPB().Dao().FindFirstRecordByFilter("subscribes", "chat_id = {:a}", dbx.Params{
+		"a": sub.ChatId,
+	})
 	if record != nil {
 		return nil
 	}
@@ -76,25 +80,27 @@ func AddSubscribe(sub *Subscribe) error {
 
 // GetSubscribeWithChatId retrieves a subscription by ChatId
 func GetSubscribeWithChatId(chatId int64) *Subscribe {
-	collection := GetPB().Dao().FindCollectionByNameOrId("subscribes")
+	collection, _ := GetPB().Dao().FindCollectionByNameOrId("subscribes")
 	if collection == nil {
 		return nil
 	}
 
-	record, err := GetPB().Dao().FindFirstRecord(collection, "chat_id = {}", chatId)
+	record, err := GetPB().Dao().FindFirstRecordByFilter("subscribes", "chat_id = {:id}", dbx.Params{
+		"id": chatId,
+	})
 	if err != nil {
 		return nil
 	}
 
 	sub := &Subscribe{
-		ID:       record.Id,
-		Name:     record.GetString("name"),
-		ChatId:   record.GetInt("chat_id"),
-		Keywords: record.GetString("keywords"),
-		Status:   record.GetString("status"),
-		Type:     record.GetString("type"),
-		CreatedAt: record.GetDateTime("created"),
-		UpdatedAt: record.GetDateTime("updated"),
+		ID:        record.Id,
+		Name:      record.GetString("name"),
+		ChatId:    int64(record.GetInt("chat_id")),
+		Keywords:  record.GetString("keywords"),
+		Status:    record.GetString("status"),
+		Type:      record.GetString("type"),
+		CreatedAt: record.GetDateTime("created").Time(),
+		UpdatedAt: record.GetDateTime("updated").Time(),
 	}
 
 	sub.AfterFind()
@@ -103,12 +109,13 @@ func GetSubscribeWithChatId(chatId int64) *Subscribe {
 
 // UpdateSubscribe updates an existing subscription
 func UpdateSubscribe(sub *Subscribe) error {
-	collection := GetPB().Dao().FindCollectionByNameOrId("subscribes")
+	collection, _ := GetPB().Dao().FindCollectionByNameOrId("subscribes")
 	if collection == nil {
 		return errors.New("collection not found")
 	}
 
-	record, err := GetPB().Dao().FindFirstRecord(collection, "chat_id = {}", sub.ChatId)
+	record, err := GetPB().Dao().FindFirstRecordByFilter("subscribes", "chat_id = {:id}",
+		dbx.Params{"id": sub.ChatId})
 	if err != nil {
 		return err
 	}
@@ -127,12 +134,13 @@ func UpdateSubscribe(sub *Subscribe) error {
 
 // DeleteSubscribe deletes a subscription by ChatId
 func DeleteSubscribe(chatId int64) error {
-	collection := GetPB().Dao().FindCollectionByNameOrId("subscribes")
+	collection, _ := GetPB().Dao().FindCollectionByNameOrId("subscribes")
 	if collection == nil {
 		return errors.New("collection not found")
 	}
 
-	record, err := GetPB().Dao().FindFirstRecord(collection, "chat_id = {}", chatId)
+	record, err := GetPB().Dao().FindFirstRecordByFilter("subscribes", "chat_id = {:id}",
+		dbx.Params{"id": chatId})
 	if err != nil {
 		return err
 	}
@@ -142,12 +150,12 @@ func DeleteSubscribe(chatId int64) error {
 
 // ListSubscribes returns all subscriptions
 func ListSubscribes() []*Subscribe {
-	collection := GetPB().Dao().FindCollectionByNameOrId("subscribes")
+	collection, _ := GetPB().Dao().FindCollectionByNameOrId("subscribes")
 	if collection == nil {
 		return nil
 	}
 
-	records, err := GetPB().Dao().FindRecordsByExpr(collection)
+	records, err := GetPB().Dao().FindRecordsByExpr("subscribes")
 	if err != nil {
 		return nil
 	}
@@ -155,14 +163,15 @@ func ListSubscribes() []*Subscribe {
 	var subs []*Subscribe
 	for _, record := range records {
 		sub := &Subscribe{
-			ID:       record.Id,
-			Name:     record.GetString("name"),
-			ChatId:   record.GetInt("chat_id"),
-			Keywords: record.GetString("keywords"),
-			Status:   record.GetString("status"),
-			Type:     record.GetString("type"),
-			CreatedAt: record.GetDateTime("created"),
-			UpdatedAt: record.GetDateTime("updated"),
+
+			ID:        record.Id,
+			Name:      record.GetString("name"),
+			ChatId:    int64(record.GetInt("chat_id")),
+			Keywords:  record.GetString("keywords"),
+			Status:    record.GetString("status"),
+			Type:      record.GetString("type"),
+			CreatedAt: record.GetDateTime("created").Time(),
+			UpdatedAt: record.GetDateTime("updated").Time(),
 		}
 		sub.AfterFind()
 		subs = append(subs, sub)
