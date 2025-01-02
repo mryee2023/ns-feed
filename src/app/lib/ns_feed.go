@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dlclark/regexp2"
 	"github.com/matoous/go-nanoid/v2"
 	"github.com/mmcdole/gofeed"
 	"github.com/thoas/go-funk"
@@ -93,25 +92,55 @@ func (f *NsFeed) Start() {
 }
 
 func hasKeyword(title string, keywords []string) bool {
+	title = strings.ToLower(title)
+
 	for _, keyword := range keywords {
 		keyword = strings.Trim(keyword, "{}")
 		keyword = strings.ToLower(keyword)
-		title = strings.ToLower(title)
-		//if strings.Contains(strings.ToLower(title), strings.ToLower(keyword)) {
-		//	return true
-		//}
-		got := ParseExpression(keyword)
-		re, err := regexp2.Compile(got, 0)
-		if err != nil {
-			continue
-		}
-		isMatch, _ := re.MatchString(title)
-		if isMatch {
-			return true
+
+		// 处理或关系 (|)
+		orParts := strings.Split(keyword, "|")
+		for _, orPart := range orParts {
+			orPart = strings.TrimSpace(orPart)
+
+			// 处理与关系 (+) 和非关系 (~)
+			andParts := strings.Split(orPart, "+")
+			allAndPartsMatch := true
+
+			for _, andPart := range andParts {
+				andPart = strings.TrimSpace(andPart)
+
+				// 处理非关系 (~)
+				notParts := strings.Split(andPart, "~")
+				mainKeyword := strings.TrimSpace(notParts[0])
+
+				// 检查主关键字是否存在
+				if !strings.Contains(title, mainKeyword) {
+					allAndPartsMatch = false
+					break
+				}
+
+				// 检查排除关键字
+				for i := 1; i < len(notParts); i++ {
+					notKeyword := strings.TrimSpace(notParts[i])
+					if strings.Contains(title, notKeyword) {
+						allAndPartsMatch = false
+						break
+					}
+				}
+
+				if !allAndPartsMatch {
+					break
+				}
+			}
+
+			// 如果所有 AND 条件都匹配，返回 true
+			if allAndPartsMatch {
+				return true
+			}
 		}
 	}
 	return false
-
 }
 
 type MessageOption struct {
