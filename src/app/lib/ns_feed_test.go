@@ -1,29 +1,29 @@
 package lib
 
 import (
-	"context"
 	"fmt"
 	"testing"
-	"time"
 
+	"github.com/imroc/req/v3"
 	"github.com/mmcdole/gofeed"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestLinuxDoFeed(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	feedUrl := "https://hostloc.com/forum.php?fid=45&mod=rss"
+	//feedUrl = "https://rsshub.app/telegram/channel/nodeloc_rss"
+	reqClient := req.C().ImpersonateChrome()
+	resp, err := reqClient.R().Get(feedUrl)
+	assert.NoError(t, err)
+	assert.Equal(t, 200, resp.StatusCode)
 	fp := gofeed.NewParser()
-	feed, err := fp.ParseURLWithContext("https://linux.do/latest.rss", ctx)
-	if err != nil {
-		fmt.Println(err)
-	}
-	if feed == nil {
-		fmt.Println("feed is nil")
-		return
-	}
+	feed, err := fp.ParseString(resp.String())
+	assert.NoError(t, err)
+	assert.NotNil(t, feed)
 
 	for _, item := range feed.Items {
-		fmt.Println(item.Title, " ", item.PublishedParsed.Add(time.Hour*8).Format("2006-01-02 15:04:05"), " ", item.Link)
+		fmt.Println(item.Title+" "+item.Link, " ", item.Published)
+
 	}
 }
 
