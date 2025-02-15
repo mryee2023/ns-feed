@@ -11,7 +11,7 @@ import (
 
 func TestLinuxDoFeed(t *testing.T) {
 	feedUrl := "https://hostloc.com/forum.php?fid=45&mod=rss"
-
+	//feedUrl = "https://rsshub.app/telegram/channel/nodeloc_rss"
 	reqClient := req.C().ImpersonateChrome()
 	resp, err := reqClient.R().Get(feedUrl)
 	assert.NoError(t, err)

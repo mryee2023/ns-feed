@@ -73,7 +73,7 @@ EOF
             -e GOARCH=amd64 \
             -e CC=x86_64-linux-gnu-gcc \
             -e CXX=x86_64-linux-gnu-g++ \
-            golang:1.21 \
+            golang:1.22 \
             bash -c "apt-get update && apt-get install -y gcc-x86-64-linux-gnu g++-x86-64-linux-gnu libc6-dev-amd64-cross && go build -o ./bin/$OUTPUT_NAME ./src/main.go"
     elif [ "$GOOS" == "darwin" ]; then
         # macOS构建使用本地环境

@@ -235,11 +235,11 @@ func (f *NsFeed) fetchRss() {
 
 			feed, err := f.loadRssData(cnf.FeedUrl, ctx)
 			if err != nil {
-				f.logger.Errorw("fetch rss failed", logx.Field("err", err))
+				f.logger.Errorw("fetch rss failed", logx.Field("err", err), logx.Field("feedUrl", cnf.FeedUrl))
 				return
 			}
 			if feed == nil {
-				f.logger.Errorw("fetch rss failed", logx.Field("err", "feed is nil"))
+				f.logger.Errorw("fetch rss failed", logx.Field("err", "feed is nil"), logx.Field("feedUrl", cnf.FeedUrl))
 				return
 			}
 			var items []*gofeed.Item
