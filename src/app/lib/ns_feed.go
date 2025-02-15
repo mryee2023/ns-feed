@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/imroc/req/v3"
 	"github.com/matoous/go-nanoid/v2"
 	"github.com/mmcdole/gofeed"
 	"github.com/thoas/go-funk"
@@ -192,6 +193,22 @@ func (f *NsFeed) sendMessage(c *MessageOption, feedName string, items []*gofeed.
 
 var isRunning bool
 
+func (f *NsFeed) loadRssData(url string, ctx context.Context) (*gofeed.Feed, error) {
+	defer func() {
+		rescue.Recover()
+	}()
+	fp := gofeed.NewParser()
+
+	//尝试换库
+	reqClient := req.C().ImpersonateChrome()
+	resp, err := reqClient.R().Get(url)
+	if err != nil {
+		return nil, err
+	}
+
+	return fp.ParseString(resp.String())
+}
+
 func (f *NsFeed) fetchRss() {
 	if isRunning {
 		fmt.Println("fetch rss is running")
@@ -215,8 +232,8 @@ func (f *NsFeed) fetchRss() {
 		wg.RunSafe(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			fp := gofeed.NewParser()
-			feed, err := fp.ParseURLWithContext(cnf.FeedUrl, ctx)
+
+			feed, err := f.loadRssData(cnf.FeedUrl, ctx)
 			if err != nil {
 				f.logger.Errorw("fetch rss failed", logx.Field("err", err))
 				return
@@ -228,7 +245,6 @@ func (f *NsFeed) fetchRss() {
 			var items []*gofeed.Item
 			for _, item := range feed.Items {
 				items = append(items, item)
-				//fmt.Println(cnf.FeedId, ",", item.Title, ",", item.Link)
 			}
 			mux.Lock()
 			feedItems[cnf.FeedId] = items
