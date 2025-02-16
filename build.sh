@@ -44,24 +44,72 @@ mkdir -p bin
 # 检查交叉编译工具
 check_cross_compile_tools
 
+# 定义支持的平台
+PLATFORMS=(
+    "linux/amd64"
+    "linux/arm64"
+    "linux/arm/v7"
+    "linux/arm/v6"
+    "linux/386"
+    "darwin/amd64"
+    "darwin/arm64"
+    "windows/amd64"
+    "windows/386"
+)
+
 # 构建各平台版本
-for platform in "linux/amd64" "darwin/amd64" "windows/amd64"; do
+for platform in "${PLATFORMS[@]}"; do
+    # 解析平台信息
     GOOS=${platform%/*}
     GOARCH=${platform#*/}
-    OUTPUT_NAME="${APP_NAME}-${GOOS}-${GOARCH}"
+    
+    # 处理特殊情况：arm 架构的版本号
+    if [[ $GOARCH == arm/* ]]; then
+        GOARM=${GOARCH#arm/v}
+        GOARCH="arm"
+    else
+        GOARM=""
+    fi
+    
+    # 构建输出文件名
+    OUTPUT_NAME="${APP_NAME}-${GOOS}"
+    if [ "$GOARCH" == "arm" ]; then
+        OUTPUT_NAME+="-armv${GOARM}"
+    else
+        OUTPUT_NAME+="-${GOARCH}"
+    fi
     if [ "$GOOS" == "windows" ]; then
         OUTPUT_NAME+=".exe"
     fi
     
-    echo "Building for $GOOS/$GOARCH..."
+    echo "Building for $GOOS/$GOARCH${GOARM:+v$GOARM}..."
+    
+    # 设置构建环境变量
+    BUILD_ENV=(
+        "CGO_ENABLED=0"
+        "GOOS=$GOOS"
+        "GOARCH=$GOARCH"
+    )
+    if [ -n "$GOARM" ]; then
+        BUILD_ENV+=("GOARM=$GOARM")
+    fi
+    
+    # 执行构建
     docker run --rm \
         -v $(pwd):/go/src/app \
         -w /go/src/app \
-        -e CGO_ENABLED=0 \
-        -e GOOS=$GOOS \
-        -e GOARCH=$GOARCH \
+        $(printf -- "-e %s " "${BUILD_ENV[@]}") \
         golang:1.22 \
         go build -o ./bin/$OUTPUT_NAME ./src/main.go
+
+    # 生成 SHA256 校验和文件
+    echo "Generating SHA256 checksum for $OUTPUT_NAME..."
+    if command -v sha256sum >/dev/null 2>&1; then
+        (cd bin && sha256sum $OUTPUT_NAME > ${OUTPUT_NAME}.sha256)
+    else
+        # macOS 使用 shasum 命令
+        (cd bin && shasum -a 256 $OUTPUT_NAME > ${OUTPUT_NAME}.sha256)
+    fi
 done
 
 echo "Build completed!"
