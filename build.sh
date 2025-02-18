@@ -72,13 +72,13 @@ build_with_docker() {
     fi
 
     # 生成 SHA256 校验和文件
-    echo "Generating SHA256 checksum for $OUTPUT_NAME..."
-    if command -v sha256sum >/dev/null 2>&1; then
-        (cd bin && sha256sum $OUTPUT_NAME | cut -d ' ' -f1 > ${OUTPUT_NAME}.sha256)
-    else
-        # macOS 使用 shasum 命令
-        (cd bin && shasum -a 256 $OUTPUT_NAME | cut -d ' ' -f1 > ${OUTPUT_NAME}.sha256)
-    fi
+    # echo "Generating SHA256 checksum for $OUTPUT_NAME..."
+    # if command -v sha256sum >/dev/null 2>&1; then
+    #     (cd bin && sha256sum $OUTPUT_NAME | cut -d ' ' -f1 > ${OUTPUT_NAME}.sha256)
+    # else
+    #     # macOS 使用 shasum 命令
+    #     (cd bin && shasum -a 256 $OUTPUT_NAME | cut -d ' ' -f1 > ${OUTPUT_NAME}.sha256)
+    # fi
 }
 
 # 主构建流程
