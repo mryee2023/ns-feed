@@ -35,72 +35,41 @@ check_cross_compile_tools() {
     fi
 }
 
-# 主构建流程
-echo "Starting multi-platform build..."
-
-# 确保 bin 目录存在
-mkdir -p bin
-
-# 检查交叉编译工具
-check_cross_compile_tools
-
-# 定义支持的平台
-PLATFORMS=(
-    "linux/amd64"
-    "linux/arm64"
-    "linux/arm/v7"
-    "linux/arm/v6"
-    "linux/386"
-    "darwin/amd64"
-    "darwin/arm64"
-    "windows/amd64"
-    "windows/386"
-)
-
-# 构建各平台版本
-for platform in "${PLATFORMS[@]}"; do
-    # 解析平台信息
-    GOOS=${platform%/*}
-    GOARCH=${platform#*/}
-    
-    # 处理特殊情况：arm 架构的版本号
-    if [[ $GOARCH == arm/* ]]; then
-        GOARM=${GOARCH#arm/v}
-        GOARCH="arm"
-    else
-        GOARM=""
-    fi
-    
-    # 构建输出文件名
-    OUTPUT_NAME="${APP_NAME}-${GOOS}"
-    if [ "$GOARCH" == "arm" ]; then
-        OUTPUT_NAME+="-armv${GOARM}"
-    else
-        OUTPUT_NAME+="-${GOARCH}"
-    fi
+# 使用Docker进行跨平台编译
+build_with_docker() {
+    local GOOS=$1
+    local GOARCH=$2
+    local OUTPUT_NAME="${APP_NAME}-${GOOS}-${GOARCH}"
     if [ "$GOOS" == "windows" ]; then
         OUTPUT_NAME+=".exe"
     fi
+
+    echo "Building for $GOOS/$GOARCH using Docker..."
+
+    # 确保 bin 目录存在
+    mkdir -p bin
     
-    echo "Building for $GOOS/$GOARCH${GOARM:+v$GOARM}..."
-    
-    # 设置构建环境变量
-    BUILD_ENV=(
-        "CGO_ENABLED=0"
-        "GOOS=$GOOS"
-        "GOARCH=$GOARCH"
-    )
-    if [ -n "$GOARM" ]; then
-        BUILD_ENV+=("GOARM=$GOARM")
+    if [ "$GOOS" == "linux" ]; then
+        # 使用特定的Docker镜像进行Linux构建
+        docker run --rm \
+            -v $(pwd):/src \
+            -w /src \
+            -e CGO_ENABLED=1 \
+            -e GOOS=linux \
+            -e GOARCH=amd64 \
+            -e CC=x86_64-linux-gnu-gcc \
+            -e CXX=x86_64-linux-gnu-g++ \
+            golang:1.22 \
+            bash -c "apt-get update && apt-get install -y gcc-x86-64-linux-gnu g++-x86-64-linux-gnu libc6-dev-amd64-cross && go build -o ./bin/$OUTPUT_NAME ./src/main.go"
+    elif [ "$GOOS" == "darwin" ]; then
+        # macOS构建使用本地环境
+        echo "Building darwin binary locally..."
+        env CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o ./bin/$OUTPUT_NAME ./src/main.go
+    else
+        # Windows构建禁用CGO
+        echo "Building windows binary with CGO disabled..."
+        env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o ./bin/$OUTPUT_NAME ./src/main.go
     fi
-    
-    # 执行构建
-    docker run --rm \
-        -v $(pwd):/go/src/app \
-        -w /go/src/app \
-        $(printf -- "-e %s " "${BUILD_ENV[@]}") \
-        golang:1.22 \
-        go build -o ./bin/$OUTPUT_NAME ./src/main.go
 
     # 生成 SHA256 校验和文件
     echo "Generating SHA256 checksum for $OUTPUT_NAME..."
@@ -110,7 +79,18 @@ for platform in "${PLATFORMS[@]}"; do
         # macOS 使用 shasum 命令
         (cd bin && shasum -a 256 $OUTPUT_NAME > ${OUTPUT_NAME}.sha256)
     fi
-done
+}
+
+# 主构建流程
+echo "Starting multi-platform build..."
+
+# 检查交叉编译工具
+check_cross_compile_tools
+
+# 构建各平台版本
+build_with_docker "linux" "amd64"
+build_with_docker "darwin" "amd64"
+build_with_docker "windows" "amd64"
 
 echo "Build completed!"
 
