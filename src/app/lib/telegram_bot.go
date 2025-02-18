@@ -86,10 +86,72 @@ func InitTgBotListen(cnf *config.Config) {
 	go updates(cnf)
 }
 
+var mainMenu tgbotapi.InlineKeyboardMarkup
+var backToMain = tgbotapi.NewInlineKeyboardButtonData("返回主菜单", "back_to_main")
+
+//var subMenu = tgbotapi.NewInlineKeyboardMarkup(
+//	tgbotapi.NewInlineKeyboardRow(
+//		tgbotapi.NewInlineKeyboardButtonData("查看我的关键字", "view"),
+//		tgbotapi.NewInlineKeyboardButtonData("添加新的关键字", "add"),
+//	),
+//	tgbotapi.NewInlineKeyboardRow(
+//		backToMain,
+//	),
+//)
+
+// 创建取消按钮
+var cancelMenu = tgbotapi.NewInlineKeyboardMarkup(
+	tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("取消添加", "cancel_add"),
+	),
+)
+
+func createRssListMarkup(chatId int64, feedId string) (string, tgbotapi.InlineKeyboardMarkup) {
+	conf := db.ListSubscribeFeedWith(chatId, feedId)
+	if len(conf.KeywordsArray) == 0 {
+		return "您还没有添加关键字", tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				backToMain,
+			),
+		)
+	}
+
+	var text string
+	var rows [][]tgbotapi.InlineKeyboardButton
+
+	// 添加每个RSS源和其删除按钮
+	for _, feed := range conf.KeywordsArray {
+		if feed == "" {
+			continue
+		}
+		text += fmt.Sprintf("%s\n", feed)
+		rows = append(rows, []tgbotapi.InlineKeyboardButton{
+			tgbotapi.NewInlineKeyboardButtonData("🗑️ 删除 #", "delete_"+feed),
+		})
+	}
+
+	// 添加返回按钮
+	rows = append(rows, []tgbotapi.InlineKeyboardButton{
+		backToMain,
+	})
+
+	return text, tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
 func updates(cfg *config.Config) {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 	updates := tgBot.GetUpdatesChan(u)
+
+	var buttons []tgbotapi.InlineKeyboardButton
+
+	feeds := db.ListAllFeedConfig()
+	for _, v := range feeds {
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(v.Name, v.FeedId))
+	}
+	mainMenu = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(buttons...),
+	)
 	for update := range updates {
 		processMessage(cfg, update)
 	}
@@ -138,6 +200,74 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 
 	subscriber := ensureSubscriber(chatInfo)
 	if subscriber == nil || subscriber.Status == "quit" {
+		return
+	}
+
+	// 处理回调数据
+	if update.CallbackQuery != nil {
+
+		fmt.Println("update.CallbackQuery", update.CallbackQuery)
+
+		// 回调查询的处理
+		callback := tgbotapi.NewCallback(update.CallbackQuery.ID, update.CallbackQuery.Data)
+		tgBot.Send(callback)
+
+		chatID := update.CallbackQuery.Message.Chat.ID
+		//var newMarkup tgbotapi.InlineKeyboardMarkup
+		//var responseText string
+
+		// 检查是否是删除操作
+		if strings.HasPrefix(update.CallbackQuery.Data, "delete_") {
+			feedID := strings.TrimPrefix(update.CallbackQuery.Data, "delete_")
+
+			// 这里应该添加实际的删除逻辑
+			//responseText = fmt.Sprintf("已删除RSS源 (ID: %s)", feedID)
+
+			// 重新显示更新后的列表
+			listText, listMarkup := createRssListMarkup(chatID, feedID)
+			msg := tgbotapi.NewMessage(chatID, listText)
+			msg.ReplyMarkup = listMarkup
+			sendMessage(&msg)
+			return
+		}
+
+		switch update.CallbackQuery.Data {
+
+		case "back_to_main":
+			//newMarkup = mainMenu
+			msg := tgbotapi.NewMessage(chatID, "asdfasdfasdf")
+			msg.ReplyMarkup = backToMain
+			sendMessage(&msg)
+			return
+
+		case "add":
+			// 设置用户状态为等待输入
+
+			// 发送新的提示消息
+			tipMsg := fmt.Sprintf("您正在为 %s 添加新的RSS源\n\n"+
+				"请按以下格式发送信息：\n"+
+				"1. RSS feed的URL地址\n"+
+				"2. 确保URL是有效的RSS feed源\n"+
+				"3. 发送完成后会自动返回主菜单\n\n"+
+				"您可以随时点击下方的「取消添加」按钮返回主菜单", "feedId")
+
+			msg := tgbotapi.NewMessage(chatID, tipMsg)
+			msg.ReplyMarkup = cancelMenu
+			sendMessage(&msg)
+			return
+		case "cancel_add":
+			// 清除用户状态
+			//delete(userStates, chatID)
+			//delete(userCategories, chatID)
+
+			// 发送主菜单
+			msg := tgbotapi.NewMessage(chatID, "已取消添加，请选择新闻类别：")
+			msg.ReplyMarkup = mainMenu
+			sendMessage(&msg)
+		default:
+			return
+		}
+
 		return
 	}
 
@@ -239,12 +369,13 @@ func handleList(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) 
 // 命令处理函数
 func handleFeed(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
 
-	feeds := db.ListAllFeedConfig()
-	var feedId []string
-	for _, v := range feeds {
-		feedId = append(feedId, "名称: "+v.Name+" , 标识: **"+v.FeedId+"**")
-	}
-	msg := tgbotapi.NewMessage(sub.ChatId, "当前支持的feed源: \n"+strings.Join(feedId, "\n"))
+	//feeds := db.ListAllFeedConfig()
+	//var feedId []string
+	//for _, v := range feeds {
+	//	feedId = append(feedId, "名称: "+v.Name+" , 标识: **"+v.FeedId+"**")
+	//}
+	msg := tgbotapi.NewMessage(sub.ChatId, "当前支持的feed源, 请点击选择:")
+	msg.ReplyMarkup = mainMenu
 	return &msg, nil
 }
 
