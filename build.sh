@@ -45,24 +45,10 @@ build_with_docker() {
     fi
 
     echo "Building for $GOOS/$GOARCH using Docker..."
+
+    # 确保 bin 目录存在
+    mkdir -p bin
     
-    # 创建临时Dockerfile用于构建
-    cat > Dockerfile.build << EOF
-FROM golang:1.21
-
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    libc6-dev \
-    gcc-aarch64-linux-gnu \
-    g++-aarch64-linux-gnu \
-    libc6-dev-arm64-cross
-
-WORKDIR /build
-COPY . .
-
-EOF
-
     if [ "$GOOS" == "linux" ]; then
         # 使用特定的Docker镜像进行Linux构建
         docker run --rm \
@@ -85,7 +71,14 @@ EOF
         env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o ./bin/$OUTPUT_NAME ./src/main.go
     fi
 
-    rm -f Dockerfile.build
+    # 生成 SHA256 校验和文件
+    echo "Generating SHA256 checksum for $OUTPUT_NAME..."
+    if command -v sha256sum >/dev/null 2>&1; then
+        (cd bin && sha256sum $OUTPUT_NAME | cut -d ' ' -f1 > ${OUTPUT_NAME}.sha256)
+    else
+        # macOS 使用 shasum 命令
+        (cd bin && shasum -a 256 $OUTPUT_NAME | cut -d ' ' -f1 > ${OUTPUT_NAME}.sha256)
+    fi
 }
 
 # 主构建流程

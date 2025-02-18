@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dlclark/regexp2"
 	"github.com/imroc/req/v3"
 	"github.com/matoous/go-nanoid/v2"
 	"github.com/mmcdole/gofeed"
@@ -92,53 +93,81 @@ func (f *NsFeed) Start() {
 
 }
 
+func hasKeywordWithRegex(title string, keyword string) bool {
+	//尝试转为正则
+	re, err := regexp2.Compile(keyword, regexp2.None)
+	if err != nil {
+		return false
+	}
+	r, _ := re.MatchString(title)
+	return r
+}
+
 func hasKeyword(title string, keywords []string) bool {
 	title = strings.ToLower(title)
-
 	for _, keyword := range keywords {
-		keyword = strings.Trim(keyword, "{}")
-		keyword = strings.ToLower(keyword)
+		resultChan := make(chan bool, 2)
+		// 并行执行两个检查函数
+		go func() {
+			resultChan <- hasKeywordWithExpression(title, keyword)
+		}()
+		go func() {
+			resultChan <- hasKeywordWithRegex(title, keyword)
+		}()
 
-		// 处理或关系 (|)
-		orParts := strings.Split(keyword, "|")
-		for _, orPart := range orParts {
-			orPart = strings.TrimSpace(orPart)
+		// 只要有一个返回 true 就可以了
+		if <-resultChan || <-resultChan {
+			return true
+		}
+	}
+	return false
+}
 
-			// 处理与关系 (+) 和非关系 (~)
-			andParts := strings.Split(orPart, "+")
-			allAndPartsMatch := true
+func hasKeywordWithExpression(title string, keyword string) bool {
+	keyword = strings.Trim(keyword, "{}")
+	keyword = strings.ToLower(keyword)
+	// 处理或关系 (|)
+	orParts := strings.Split(keyword, "|")
+	if len(orParts) == 1 {
+		return strings.Contains(title, keyword)
+	}
+	for _, orPart := range orParts {
+		orPart = strings.TrimSpace(orPart)
 
-			for _, andPart := range andParts {
-				andPart = strings.TrimSpace(andPart)
+		// 处理与关系 (+) 和非关系 (~)
+		andParts := strings.Split(orPart, "+")
+		allAndPartsMatch := true
 
-				// 处理非关系 (~)
-				notParts := strings.Split(andPart, "~")
-				mainKeyword := strings.TrimSpace(notParts[0])
+		for _, andPart := range andParts {
+			andPart = strings.TrimSpace(andPart)
 
-				// 检查主关键字是否存在
-				if !strings.Contains(title, mainKeyword) {
+			// 处理非关系 (~)
+			notParts := strings.Split(andPart, "~")
+			mainKeyword := strings.TrimSpace(notParts[0])
+
+			// 检查主关键字是否存在
+			if !strings.Contains(title, mainKeyword) {
+				allAndPartsMatch = false
+				break
+			}
+
+			// 检查排除关键字
+			for i := 1; i < len(notParts); i++ {
+				notKeyword := strings.TrimSpace(notParts[i])
+				if strings.Contains(title, notKeyword) {
 					allAndPartsMatch = false
 					break
 				}
-
-				// 检查排除关键字
-				for i := 1; i < len(notParts); i++ {
-					notKeyword := strings.TrimSpace(notParts[i])
-					if strings.Contains(title, notKeyword) {
-						allAndPartsMatch = false
-						break
-					}
-				}
-
-				if !allAndPartsMatch {
-					break
-				}
 			}
 
-			// 如果所有 AND 条件都匹配，返回 true
-			if allAndPartsMatch {
-				return true
+			if !allAndPartsMatch {
+				break
 			}
+		}
+
+		// 如果所有 AND 条件都匹配，返回 true
+		if allAndPartsMatch {
+			return true
 		}
 	}
 	return false

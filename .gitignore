@@ -4,3 +4,4 @@ bin
 build
 db/ns.db
 /ns-rss
+/data/sqlite.db
