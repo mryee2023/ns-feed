@@ -2,8 +2,8 @@ module ns-rss
 
 go 1.22.0
 
-
 require (
+	github.com/dlclark/regexp2 v1.11.5
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/golang-module/carbon/v2 v2.4.1
 	github.com/imroc/req/v3 v3.49.1

@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/dlclark/regexp2"
 	"github.com/imroc/req/v3"
 	"github.com/matoous/go-nanoid/v2"
 	"github.com/mmcdole/gofeed"
@@ -95,19 +95,28 @@ func (f *NsFeed) Start() {
 
 func hasKeywordWithRegex(title string, keyword string) bool {
 	//尝试转为正则
-	re, err := regexp.Compile(keyword)
+	re, err := regexp2.Compile(keyword, regexp2.None)
 	if err != nil {
 		return false
 	}
-	return re.MatchString(title)
+	r, _ := re.MatchString(title)
+	return r
 }
 
 func hasKeyword(title string, keywords []string) bool {
 	title = strings.ToLower(title)
 	for _, keyword := range keywords {
-		exp := hasKeywordWithExpression(title, keyword)
-		reg := hasKeywordWithRegex(title, keyword)
-		if exp || reg {
+		resultChan := make(chan bool, 2)
+		// 并行执行两个检查函数
+		go func() {
+			resultChan <- hasKeywordWithExpression(title, keyword)
+		}()
+		go func() {
+			resultChan <- hasKeywordWithRegex(title, keyword)
+		}()
+
+		// 只要有一个返回 true 就可以了
+		if <-resultChan || <-resultChan {
 			return true
 		}
 	}
