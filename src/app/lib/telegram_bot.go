@@ -56,15 +56,9 @@ type CommandHandler func(*db.Subscribe, []string) (*tgbotapi.MessageConfig, erro
 
 // 命令处理器映射
 var commandHandlers = map[string]CommandHandler{
-	//cmdList:   handleList,
 	cmdFeed: handleFeed,
 	cmdAdd:  handleAdd,
-	//cmdDelete: handleDelete,
 	cmdHelp: handleHelp,
-	//cmdOn:     handleOn,
-	//cmdOff:    handleOff,
-	//cmdQuit:   handleQuit,
-	//cmdStart:  handleStart,
 }
 
 func InitTgBotListen(cnf *config.Config) {
@@ -471,7 +465,7 @@ func handleAdd(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, error
 	// 检查是否存在该feedId
 	v := db.GetFeedConfigWithFeedId(feedId)
 	if v.ID == 0 {
-		return nil, errors.New("该feedId不存在, 请先使用 /feed 查看支持的feedId")
+		return nil, errors.New("未找到该feed")
 	}
 
 	args = args[1:]
@@ -479,6 +473,24 @@ func handleAdd(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, error
 	args = funk.Map(args, func(s string) string {
 		return strings.Trim(strings.TrimSpace(s), "{}")
 	}).([]string)
+
+	// 检查每个关键字的callback_data长度
+	var invalidKeywords []string
+	for _, keyword := range args {
+		data := vars.CallbackEvent[vars.CallbackDeleteKeyword]{
+			Data: vars.CallbackDeleteKeyword{
+				Keyword: keyword,
+				FeedId:  feedId,
+			},
+		}
+		if len(data.Param()) > 64 {
+			invalidKeywords = append(invalidKeywords, keyword)
+		}
+	}
+
+	if len(invalidKeywords) > 0 {
+		return nil, fmt.Errorf("以下关键字太长，请缩短后重新添加：\n%s", strings.Join(invalidKeywords, "\n"))
+	}
 
 	//更新db
 	exists := db.ListSubscribeFeedWith(sub.ChatId, feedId)
@@ -578,7 +590,7 @@ func handleHelp(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) 
 		},
 	}
 	button := tgbotapi.NewInlineKeyboardButtonData("开启关键字通知", on.Param())
-	if sub.Status == "on" {
+	if sub.Status == "on" || sub.Status == "" {
 		off := vars.CallbackEvent[vars.CallbackStatusOff]{
 			Data: vars.CallbackStatusOff{
 				ChatId: sub.ChatId,
