@@ -206,12 +206,16 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 			if len(subscribe.KeywordsArray) > 0 {
 				var keywords []tgbotapi.InlineKeyboardButton
 				for _, v := range subscribe.KeywordsArray {
-					v += "🗑️ " + v
+					v = "🗑️ " + v
 					data := vars.CallbackEvent[vars.CallbackDeleteKeyword]{
 						Data: vars.CallbackDeleteKeyword{
 							Keyword: v,
 							FeedId:  feed.FeedId,
 						},
+					}
+					//判断一下长度
+					if len(data.Param()) > 64 {
+						continue
 					}
 					keywords = append(keywords, tgbotapi.NewInlineKeyboardButtonData(v, data.Param()))
 				}
@@ -424,7 +428,7 @@ func splitAndClean(text string) []string {
 
 // sendMessage 发送消息
 func sendMessage(msg *tgbotapi.MessageConfig) {
-	msg.ParseMode = tgbotapi.ModeMarkdown
+	//msg.ParseMode = tgbotapi.ModeMarkdown
 	result, err := tgBot.Send(msg)
 	if err != nil {
 		log.WithField("msg", msg.Text).

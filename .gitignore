@@ -5,3 +5,4 @@ build
 db/ns.db
 /ns-rss
 /data/sqlite.db
+/src/etc/config.simple.yaml

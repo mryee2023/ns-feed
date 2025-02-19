@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -381,5 +382,39 @@ func TestStructuredBotButtons(t *testing.T) {
 			t.Errorf("handleCallback(%s) got %d rows, want %d rows",
 				tc.callback, len(result.InlineKeyboard), tc.want)
 		}
+	}
+}
+
+func TestNsFeed_loadRssData(t *testing.T) {
+
+	type args struct {
+		url string
+		ctx context.Context
+	}
+	tests := []struct {
+		name string
+
+		args args
+
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "正常加载RSS数据",
+			args: args{
+				url: "https://rsshub.app/telegram/channel/nodeloc_rss",
+				ctx: context.Background(),
+			},
+			wantErr: assert.NoError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := NewNsFeed(context.Background(), &ServiceCtx{})
+			_, err := f.loadRssData(tt.args.url, tt.args.ctx)
+			if !tt.wantErr(t, err, fmt.Sprintf("loadRssData(%v, %v)", tt.args.url, tt.args.ctx)) {
+				return
+			}
+
+		})
 	}
 }
