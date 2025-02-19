@@ -233,7 +233,7 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 				)
 				keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(backToMain))
 
-				msg := tgbotapi.NewMessage(chatID, "以下是您已添加的关键字:")
+				msg := tgbotapi.NewMessage(chatID, "以下是您已添加的 "+feed.Name+" 关键字:")
 				msg.ReplyMarkup = keyboard
 				msg.ParseMode = tgbotapi.ModeHTML
 				sendMessage(&msg)
