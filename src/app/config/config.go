@@ -10,9 +10,10 @@ import (
 var ChatType string
 
 const (
-	ChatTypeChat    = "chat"
-	ChatTypeGroup   = "group"
-	ChatTypeChannel = "channel"
+	ChatTypeChat     = "chat"
+	ChatTypeGroup    = "group"
+	ChatTypeChannel  = "channel"
+	ChatTypeCallback = "callback"
 )
 
 type Subscribe struct {
