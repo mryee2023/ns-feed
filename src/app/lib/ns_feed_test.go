@@ -49,6 +49,14 @@ func Test_hasKeyword(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "正则关键字测试2",
+			args: args{
+				title:    "剩余价值push出港仔CMHK NAT 续费 13.88u/月",
+				keywords: []string{`(?=.*(港仔|ggy|claw).*)`},
+			},
+			want: true,
+		},
+		{
 			name: "存量关键字匹配",
 			args: args{
 				title:    "剩余价值➕push出港仔CMHK NAT 续费 13.88u/月",

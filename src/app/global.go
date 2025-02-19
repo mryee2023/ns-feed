@@ -1,7 +1,7 @@
 package app
 
 import (
-	"encoding/json"
+	json "github.com/bytedance/sonic"
 
 	"github.com/spf13/cast"
 	config2 "ns-rss/src/app/config"
