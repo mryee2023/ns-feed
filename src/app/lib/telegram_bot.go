@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	json "github.com/bytedance/sonic"
@@ -40,7 +41,9 @@ var helpText = `
 `
 
 var (
-	tgBot *tgbotapi.BotAPI
+	tgBot          *tgbotapi.BotAPI
+	mainMenu       tgbotapi.InlineKeyboardMarkup
+	lastMessageIDs sync.Map // 存储每个chat的最后一条消息ID
 )
 
 // ChatInfo 存储聊天相关信息
@@ -75,7 +78,6 @@ func InitTgBotListen(cnf *config.Config) {
 	go updates(cnf)
 }
 
-var mainMenu tgbotapi.InlineKeyboardMarkup
 var backToMain = tgbotapi.NewInlineKeyboardButtonData("🔙返回主菜单",
 	(&vars.CallbackEvent[vars.CallbackBackToMain]{
 		Data: vars.CallbackBackToMain{},
@@ -426,13 +428,36 @@ func sendMessage(msg *tgbotapi.MessageConfig) {
 	result, err := tgBot.Send(msg)
 	if err != nil {
 		log.WithField("msg", msg.Text).
-			WithField("error", err).
-			Error("send message failure")
-	} else {
-		log.WithField("msg", msg.Text).
-			WithField("result id", result.MessageID).
-			Info("send message success")
+			WithError(err).
+			Error("Failed to send message")
+		return
 	}
+
+	// 如果消息带有ReplyMarkup
+	if msg.ReplyMarkup != nil {
+		// 获取上一条消息的ID
+		if lastID, ok := lastMessageIDs.Load(msg.ChatID); ok {
+			// 删除上一条消息
+			go func(chatID int64, messageID int) {
+				time.Sleep(3 * time.Second)
+				deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+				_, err := tgBot.Request(deleteMsg)
+				if err != nil {
+					log.WithError(err).
+						WithField("chat_id", chatID).
+						WithField("message_id", messageID).
+						Error("Failed to delete message")
+				}
+			}(msg.ChatID, lastID.(int))
+		}
+
+		// 更新最后一条消息的ID
+		lastMessageIDs.Store(msg.ChatID, result.MessageID)
+	}
+
+	log.WithField("msg", msg.Text).
+		WithField("chat_id", msg.ChatID).
+		Info("Message sent")
 }
 
 // 命令处理函数
