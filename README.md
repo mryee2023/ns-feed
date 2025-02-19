@@ -12,15 +12,12 @@ NodeSeek Feed 关键字通知机器人是一个Telegram机器人，用于监控N
 在Telegram中搜索 `@nsfeed_noc_bot` 并添加机器人。
 
 #### 2.2 设置关键字
-- 发送 `/start` 启动机器人
+
 - 发送 `/feed` 查看当前已配置的RSS源 
 - 发送 `/help` 查看帮助
 - 发送 `/add` 添加关键字 格式：`/add feedId 关键字1 关键字2 ...`
-- 发送 `/list` 查看关键字列表
-- 发送 `/delete` 删除关键字 格式：`/delete feedId 关键字1 关键字2 ...`
-- 发送 `/on` 启用关键字通知
-- 发送 `/off` 关闭关键字通知
-- 发送 `/quit` 退出机器人通知
+
+
 
 
 ### 3. 其他
