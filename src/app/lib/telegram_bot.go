@@ -422,7 +422,7 @@ func splitAndClean(text string) []string {
 
 // sendMessage 发送消息
 func sendMessage(msg *tgbotapi.MessageConfig) {
-	//msg.ParseMode = tgbotapi.ModeMarkdown
+	msg.ParseMode = tgbotapi.ModeMarkdown
 	result, err := tgBot.Send(msg)
 	if err != nil {
 		log.WithField("msg", msg.Text).
@@ -433,18 +433,6 @@ func sendMessage(msg *tgbotapi.MessageConfig) {
 			WithField("result id", result.MessageID).
 			Info("send message success")
 	}
-}
-
-// 命令处理函数
-func handleList(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
-
-	keys := db.ListSubscribeFeedConfig(sub.ChatId)
-	var sb strings.Builder
-	for k, v := range keys {
-		sb.WriteString(fmt.Sprintf("feed源: %s, 关键字: %s\n", k, strings.Join(v, " , ")))
-	}
-	msg := tgbotapi.NewMessage(sub.ChatId, "当前配置的关键字: \n"+sb.String())
-	return &msg, nil
 }
 
 // 命令处理函数
@@ -618,21 +606,6 @@ func handleOff(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
 	sub.Status = "off"
 	db.UpdateSubscribe(sub)
 	msg := tgbotapi.NewMessage(sub.ChatId, "关键字通知已成功关闭")
-	return &msg, nil
-}
-
-func handleStart(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
-	sub.Status = "on"
-	db.UpdateSubscribe(sub)
-	msg := tgbotapi.NewMessage(sub.ChatId, "欢迎回来, 请用 /help 查看帮助说明。")
-	return &msg, nil
-
-}
-
-func handleQuit(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
-	sub.Status = "quit"
-	db.UpdateSubscribe(sub)
-	msg := tgbotapi.NewMessage(sub.ChatId, "Bye~您现在可以移除本机器人了\n期待您的再次使用")
 	return &msg, nil
 }
 
