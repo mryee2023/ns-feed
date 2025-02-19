@@ -227,7 +227,10 @@ func (f *NsFeed) loadRssData(url string, ctx context.Context) (*gofeed.Feed, err
 		rescue.Recover()
 	}()
 	fp := gofeed.NewParser()
-
+	//fix:
+	if strings.Contains(url, "nodeloc_rss") {
+		return fp.ParseURLWithContext(url, ctx)
+	}
 	reqClient := req.C().ImpersonateChrome()
 	resp, err := reqClient.R().Get(url)
 	if err != nil {
