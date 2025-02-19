@@ -99,11 +99,25 @@ func updates(cfg *config.Config) {
 			},
 		}
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(v.Name, event.Param()))
-
 	}
+
+	// 为管理员添加统计按钮
+	if cfg.AdminId != 0 {
+		statusEvent := &vars.CallbackEvent[vars.CallbackStatus]{
+			Data: vars.CallbackStatus{
+				ChatId: cfg.AdminId,
+			},
+		}
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("📊 统计", statusEvent.Param()))
+	}
+
 	mainMenu = tgbotapi.NewInlineKeyboardMarkup()
-	for _, button := range buttons {
-		mainMenu.InlineKeyboard = append(mainMenu.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(button))
+
+	chunkButton := funk.Chunk(buttons, 2).([][]tgbotapi.InlineKeyboardButton)
+	for _, keyboardButtons := range chunkButton {
+		row := make([]tgbotapi.InlineKeyboardButton, 0, len(keyboardButtons))
+		row = append(row, keyboardButtons...)
+		mainMenu.InlineKeyboard = append(mainMenu.InlineKeyboard, row)
 	}
 
 	for update := range updates {
@@ -195,14 +209,11 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 		case string(vars.EventSelectFeed):
 			// 获取完整的feed信息
 			feed := db.GetFeedConfigWithFeedId(event.Data.FeedId)
-
-			// 获取关键字列表
-
 			subscribe := db.ListSubscribeFeedWith(chatID, feed.FeedId)
 			if len(subscribe.KeywordsArray) > 0 {
 				var keywords []tgbotapi.InlineKeyboardButton
+
 				for _, v := range subscribe.KeywordsArray {
-					v = "🗑️ " + v
 					data := vars.CallbackEvent[vars.CallbackDeleteKeyword]{
 						Data: vars.CallbackDeleteKeyword{
 							Keyword: v,
@@ -213,7 +224,7 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 					if len(data.Param()) > 64 {
 						continue
 					}
-					keywords = append(keywords, tgbotapi.NewInlineKeyboardButtonData(v, data.Param()))
+					keywords = append(keywords, tgbotapi.NewInlineKeyboardButtonData("🗑️ "+v, data.Param()))
 				}
 				keyboard := tgbotapi.NewInlineKeyboardMarkup()
 
@@ -224,8 +235,13 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 					},
 				}
 
-				for _, keyword := range keywords {
-					keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(keyword))
+				//2个一行
+				chunkButton := funk.Chunk(keywords, 2).([][]tgbotapi.InlineKeyboardButton)
+
+				for _, buttons := range chunkButton {
+					row := make([]tgbotapi.InlineKeyboardButton, 0, 2)
+					row = append(row, buttons...)
+					keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, row)
 				}
 
 				keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(
@@ -350,6 +366,86 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 			msg, _ := handleOff(subscriber, nil)
 			sendMessage(msg)
 			return
+		case string(vars.EventStatus):
+			var statusEvent vars.CallbackEvent[vars.CallbackStatus]
+			if err := json.Unmarshal([]byte(callbackData), &statusEvent); err != nil {
+				return
+			}
+
+			// 只允许管理员访问
+			if chatID != cfg.AdminId {
+				msg := tgbotapi.NewMessage(chatID, "抱歉，只有管理员可以查看统计信息")
+				sendMessage(&msg)
+				return
+			}
+
+			subscribers := db.ListSubscribes()
+			todaySend := db.GetNotifyCountByDateTime(carbon.Now().StartOfDay().StdTime(), time.Now())
+
+			ip := getPublicIP()
+			if ip != "" {
+				parts := strings.Split(ip, ".")
+				ip = strings.Join(parts[:3], ".") + ".*"
+			} else {
+				ip = "未知"
+			}
+
+			// 计算活跃用户数（status为"on"的用户）
+			var activeUsers int
+			for _, sub := range subscribers {
+				if sub.Status == "on" || sub.Status == "" {
+					activeUsers++
+				}
+			}
+
+			// 获取所有Feed的统计信息
+			//feeds := db.ListAllFeedConfig()
+			//var feedStats strings.Builder
+			//for _, feed := range feeds {
+			//	//TODO：
+			//	//subs := db.ListSubscribeFeedWithFeedId(feed.FeedId)
+			//	feedStats.WriteString(fmt.Sprintf("\n%s: %d 个订阅", feed.Name, 9))
+			//}
+
+			message := fmt.Sprintf("📊 系统统计\n"+
+				"-------------------\n"+
+				"👥 总用户数: %d\n"+
+				"✅ 活跃用户: %d\n"+
+				"📨 今日推送: %d\n"+
+				"🌐 当前IP: %s\n"+
+				"-------------------\n",
+				len(subscribers),
+				activeUsers,
+				todaySend,
+				ip,
+			)
+
+			// 创建刷新按钮
+			refreshEvent := vars.CallbackEvent[vars.CallbackStatus]{
+				Data: vars.CallbackStatus{
+					ChatId: chatID,
+				},
+			}
+
+			// 验证callback_data长度
+			if len(refreshEvent.Param()) > 64 {
+				msg := tgbotapi.NewMessage(chatID, "抱歉，刷新按钮暂时不可用")
+				sendMessage(&msg)
+				return
+			}
+
+			keyboard := tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("🔄 刷新", refreshEvent.Param()),
+					backToMain,
+				),
+			)
+
+			msg := tgbotapi.NewMessage(chatID, message)
+			msg.ReplyMarkup = keyboard
+			msg.ParseMode = tgbotapi.ModeHTML
+			sendMessage(&msg)
+			return
 		}
 		return
 	}
@@ -391,7 +487,7 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 func ensureSubscriber(info *ChatInfo) *db.Subscribe {
 	subscriber := db.GetSubscribeWithChatId(info.ChatID)
 	if subscriber == nil {
-		tgBot.Send(tgbotapi.NewMessage(info.ChatID, "欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明。"))
+		tgBot.Send(tgbotapi.NewMessage(info.ChatID, "这是您的首次使用, 请用 /help 查看帮助说明。"))
 		db.AddSubscribe(&db.Subscribe{
 			Name:      info.Name,
 			ChatId:    info.ChatID,
@@ -424,7 +520,9 @@ func splitAndClean(text string) []string {
 
 // sendMessage 发送消息
 func sendMessage(msg *tgbotapi.MessageConfig) {
-	msg.ParseMode = tgbotapi.ModeMarkdown
+	if msg.ParseMode == "" {
+		msg.ParseMode = tgbotapi.ModeMarkdown
+	}
 	result, err := tgBot.Send(msg)
 	if err != nil {
 		log.WithField("msg", msg.Text).
@@ -641,7 +739,7 @@ func handleStatus(sub *db.Subscribe) {
 	ip := getPublicIP()
 	if ip != "" {
 		parts := strings.Split(ip, ".")
-		ip = fmt.Sprintf("%s.\\*.%s.%s", parts[0], parts[2], parts[3])
+		ip = fmt.Sprintf("%s.*.%s.%s", parts[0], parts[2], parts[3])
 	} else {
 		ip = "未知"
 	}
@@ -649,6 +747,7 @@ func handleStatus(sub *db.Subscribe) {
 	message := fmt.Sprintf("当前状态: \n订阅数: %d \n当天发送: %d \n当前IP: %s",
 		len(subscribers), todaySend, ip)
 	msg := tgbotapi.NewMessage(sub.ChatId, message)
+	msg.ParseMode = tgbotapi.ModeHTML
 	sendMessage(&msg)
 }
 
