@@ -228,7 +228,6 @@ func (f *NsFeed) loadRssData(url string, ctx context.Context) (*gofeed.Feed, err
 	}()
 	fp := gofeed.NewParser()
 
-	//尝试换库
 	reqClient := req.C().ImpersonateChrome()
 	resp, err := reqClient.R().Get(url)
 	if err != nil {

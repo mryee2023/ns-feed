@@ -2,12 +2,13 @@ package lib
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
+
+	json "github.com/bytedance/sonic"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/golang-module/carbon/v2"
@@ -205,18 +206,18 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 			if len(subscribe.KeywordsArray) > 0 {
 				var keywords []tgbotapi.InlineKeyboardButton
 				for _, v := range subscribe.KeywordsArray {
+					v = "🗑️ " + v
 					data := vars.CallbackEvent[vars.CallbackDeleteKeyword]{
 						Data: vars.CallbackDeleteKeyword{
 							Keyword: v,
 							FeedId:  feed.FeedId,
 						},
 					}
-
-					text := "🗑️" + escapeButtonText(v)
-
-					fmt.Println(text, " 大小 > ", len(data.Param()), " 参数 > ", data.Param())
-
-					keywords = append(keywords, tgbotapi.NewInlineKeyboardButtonData(text, data.Param()))
+					//判断一下长度
+					if len(data.Param()) > 64 {
+						continue
+					}
+					keywords = append(keywords, tgbotapi.NewInlineKeyboardButtonData(v, data.Param()))
 				}
 				keyboard := tgbotapi.NewInlineKeyboardMarkup()
 
@@ -228,7 +229,6 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 				}
 
 				for _, keyword := range keywords {
-					fmt.Println(keyword)
 					keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(keyword))
 				}
 
@@ -508,7 +508,7 @@ func handleAdd(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, error
 				},
 			}
 
-			text := "🗑️" + escapeButtonText(v)
+			text := "🗑️" + v
 			keywords = append(keywords, tgbotapi.NewInlineKeyboardButtonData(text, data.Param()))
 		}
 		keyboard := tgbotapi.NewInlineKeyboardMarkup()
@@ -654,24 +654,4 @@ func getPublicIP() string {
 
 func TgBotInstance() *tgbotapi.BotAPI {
 	return tgBot
-}
-
-func escapeButtonText(text string) string {
-	return text
-	//replacer := strings.NewReplacer(
-	//	"(", "\\(",
-	//	")", "\\)",
-	//	"[", "\\[",
-	//	"]", "\\]",
-	//	"?", "\\?",
-	//	".", "\\.",
-	//	"+", "\\+",
-	//	"*", "\\*",
-	//	"^", "\\^",
-	//	"$", "\\$",
-	//	"|", "\\|",
-	//	"{", "\\{",
-	//	"}", "\\}",
-	//)
-	//return replacer.Replace(text)
 }

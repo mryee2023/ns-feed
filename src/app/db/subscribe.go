@@ -1,10 +1,11 @@
 package db
 
 import (
-	"encoding/json"
 	"log"
 	"os"
 	"time"
+
+	json "github.com/bytedance/sonic"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"

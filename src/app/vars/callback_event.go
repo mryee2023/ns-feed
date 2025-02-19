@@ -1,19 +1,19 @@
 package vars
 
 import (
-	"encoding/json"
+	json "github.com/bytedance/sonic"
 )
 
 type Event string
 
 const (
-	EventSelectFeed    Event = "01"
-	EventBackToMain    Event = "02"
-	EventDeleteKeyword Event = "03"
-	EventAddKeyword    Event = "04"
-	EventConfirmDelete Event = "05"
-	EventOn            Event = "06"
-	EventOff           Event = "07"
+	EventSelectFeed    Event = "1"
+	EventBackToMain    Event = "2"
+	EventDeleteKeyword Event = "3"
+	EventAddKeyword    Event = "4"
+	EventConfirmDelete Event = "5"
+	EventOn            Event = "6"
+	EventOff           Event = "7"
 )
 
 type CallbackEvent[T CallbackData] struct {

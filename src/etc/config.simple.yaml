@@ -1,7 +1,0 @@
-port: :8080
-tgToken: 0
-nsFeed: https://rss.nodeseek.com
-adminId: 0
-fetchTimeInterval: 10s
-accessKey: 123
-online: false

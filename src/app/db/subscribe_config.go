@@ -1,8 +1,9 @@
 package db
 
 import (
-	"encoding/json"
 	"time"
+
+	json "github.com/bytedance/sonic"
 
 	"gorm.io/gorm"
 )
