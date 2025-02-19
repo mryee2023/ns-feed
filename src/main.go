@@ -145,7 +145,7 @@ func main() {
 			log.Info("NodeSeek Feed服务已离线")
 			return
 		}
-		feeder := lib.NewNsFeed(context.Background(), svc)
+		feeder := lib.NewNsFeed(context.Background(), svc, &config)
 		feeder.SetBot(app.GetBotInstance())
 		feeder.Start()
 	}()

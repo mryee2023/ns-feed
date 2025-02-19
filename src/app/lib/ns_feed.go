@@ -12,11 +12,13 @@ import (
 	"github.com/imroc/req/v3"
 	"github.com/matoous/go-nanoid/v2"
 	"github.com/mmcdole/gofeed"
+	log "github.com/sirupsen/logrus"
 	"github.com/thoas/go-funk"
 	"github.com/zeromicro/go-zero/core/collection"
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/rescue"
 	"github.com/zeromicro/go-zero/core/threading"
+	"ns-rss/src/app/config"
 	"ns-rss/src/app/db"
 )
 
@@ -26,18 +28,30 @@ import (
 //var noticeHistory = make(map[string]int64)
 
 type NsFeed struct {
-	ctx    context.Context
-	svc    *ServiceCtx
-	logger logx.Logger
-	bot    BotNotifier
-	q      *collection.TimingWheel
+	sync.Mutex
+	ctx          context.Context
+	svc          *ServiceCtx
+	logger       logx.Logger
+	bot          BotNotifier
+	q            *collection.TimingWheel
+	Config       *config.Config
+	LastUpdate   time.Time
+	interval     time.Duration // 当前请求间隔
+	minInterval  time.Duration // 最小间隔
+	maxInterval  time.Duration // 最大间隔
+	successCount int           // 连续成功次数
+	failureCount int           // 连续失败次数
 }
 
-func NewNsFeed(ctx context.Context, svc *ServiceCtx) *NsFeed {
+func NewNsFeed(ctx context.Context, svc *ServiceCtx, config *config.Config) *NsFeed {
 	return &NsFeed{
-		ctx:    ctx,
-		svc:    svc,
-		logger: logx.WithContext(ctx).WithFields(logx.Field("lib", "ns_feed")),
+		ctx:         ctx,
+		svc:         svc,
+		logger:      logx.WithContext(ctx).WithFields(logx.Field("lib", "ns_feed")),
+		Config:      config,
+		interval:    10 * time.Second, // 初始间隔
+		minInterval: 10 * time.Second, // 最小间隔
+		maxInterval: 5 * time.Minute,  // 最大间隔
 	}
 }
 
@@ -66,31 +80,32 @@ func (f *NsFeed) Start() {
 		rescue.Recover()
 	}()
 	f.logger.Infow("start ns feed......")
+	//
+	//ds, e := time.ParseDuration(f.svc.Config.FetchTimeInterval)
+	//if e != nil {
+	//	f.logger.Errorw("parse duration failed", logx.Field("err", e), logx.Field("FetchTimeInterval", f.svc.Config.FetchTimeInterval))
+	//	ds = 10 * time.Second
+	//}
+	//if ds < 10*time.Second {
+	//	ds = 10 * time.Second
+	//}
+	//go func() {
+	//	defer func() {
+	//		rescue.Recover()
+	//	}()
+	//	tk := time.NewTicker(ds)
+	//	defer tk.Stop()
+	//	for {
+	//		select {
+	//		case <-f.ctx.Done():
+	//			return
+	//		case <-tk.C:
+	//			f.fetchRss()
+	//		}
+	//	}
+	//}()
 
-	ds, e := time.ParseDuration(f.svc.Config.FetchTimeInterval)
-	if e != nil {
-		f.logger.Errorw("parse duration failed", logx.Field("err", e), logx.Field("FetchTimeInterval", f.svc.Config.FetchTimeInterval))
-		ds = 10 * time.Second
-	}
-	if ds < 10*time.Second {
-		ds = 10 * time.Second
-	}
-	go func() {
-		defer func() {
-			rescue.Recover()
-		}()
-		tk := time.NewTicker(ds)
-		defer tk.Stop()
-		for {
-			select {
-			case <-f.ctx.Done():
-				return
-			case <-tk.C:
-				f.fetchRss()
-			}
-		}
-	}()
-
+	f.startAdaptiveFetch()
 }
 
 func hasKeywordWithRegex(title string, keyword string) bool {
@@ -316,4 +331,118 @@ func (f *NsFeed) fetchRss() {
 		}()
 	}
 	swg.Wait()
+}
+
+func (f *NsFeed) adjustInterval(success bool) {
+	f.Lock()
+	defer f.Unlock()
+
+	if success {
+		f.failureCount = 0
+		f.successCount++
+
+		// 连续成功10次后，尝试减少间隔
+		if f.successCount >= 10 {
+			newInterval := f.interval - (5 * time.Second)
+			if newInterval >= f.minInterval {
+				f.interval = newInterval
+				log.Infof("RSS请求稳定，减少间隔至 %v", f.interval)
+			}
+			f.successCount = 0
+		}
+	} else {
+		f.successCount = 0
+		f.failureCount++
+
+		// 失败后立即增加间隔
+		multiplier := float64(f.failureCount)
+		if multiplier > 4 {
+			multiplier = 4 // 限制最大倍数
+		}
+
+		newInterval := time.Duration(float64(f.interval) * (1 + (0.5 * multiplier)))
+		if newInterval <= f.maxInterval {
+			f.interval = newInterval
+			log.Warnf("RSS请求失败，增加间隔至 %v", f.interval)
+		} else {
+			f.interval = f.maxInterval
+			log.Warnf("RSS请求达到最大间隔 %v", f.maxInterval)
+		}
+	}
+}
+
+func (f *NsFeed) fetchRssAdaptive(feed *db.FeedConfig) {
+	defer rescue.Recover()
+
+	resp, err := f.loadRssData(feed.FeedUrl, f.ctx)
+
+	if err != nil || resp == nil {
+		log.WithError(err).Error("获取RSS失败")
+		f.adjustInterval(false)
+		return
+	}
+
+	// 请求成功
+	f.adjustInterval(true)
+
+	if len(resp.Items) == 0 {
+		return
+	}
+
+	f.Lock()
+	defer f.Unlock()
+
+	// 其他处理逻辑保持不变
+	subscribes := db.ListSubscribes()
+	subscribes = funk.Filter(subscribes, func(c *db.Subscribe) bool {
+		c.Status = strings.ToLower(c.Status)
+		c.Status = strings.TrimSpace(c.Status)
+		return c.Status == "on" || c.Status == ""
+	}).([]*db.Subscribe)
+
+	var swg sync.WaitGroup
+
+	for _, subscribe := range subscribes {
+		subscribe := subscribe
+		swg.Add(1)
+		go func() {
+			defer func() {
+				swg.Done()
+				rescue.Recover()
+			}()
+			for _, items := range resp.Items {
+				subKeys := db.ListSubscribeFeedWith(subscribe.ChatId, feed.FeedId)
+				if subKeys.ID == 0 {
+					continue
+				}
+
+				f.sendMessage(&MessageOption{
+					ChatId:   subscribe.ChatId,
+					FeedName: feed.Name,
+					Keywords: subKeys.KeywordsArray,
+				}, feed.Name, []*gofeed.Item{items})
+			}
+		}()
+	}
+	swg.Wait()
+}
+
+func (f *NsFeed) startAdaptiveFetch() {
+	go func() {
+		defer func() {
+			rescue.Recover()
+		}()
+		for {
+			f.Lock()
+			currentInterval := f.interval
+			f.Unlock()
+
+			time.Sleep(currentInterval)
+
+			feeds := db.ListAllFeedConfig()
+			for _, feed := range feeds {
+				f.fetchRssAdaptive(&feed)
+			}
+		}
+	}()
 }
