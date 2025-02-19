@@ -212,7 +212,10 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 						},
 					}
 
-					text := "🗑️" + v
+					text := "🗑️" + escapeButtonText(v)
+
+					fmt.Println(text, " 大小 > ", len(data.Param()), " 参数 > ", data.Param())
+
 					keywords = append(keywords, tgbotapi.NewInlineKeyboardButtonData(text, data.Param()))
 				}
 				keyboard := tgbotapi.NewInlineKeyboardMarkup()
@@ -225,6 +228,7 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 				}
 
 				for _, keyword := range keywords {
+					fmt.Println(keyword)
 					keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(keyword))
 				}
 
@@ -235,6 +239,7 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 
 				msg := tgbotapi.NewMessage(chatID, "以下是您已添加的关键字:")
 				msg.ReplyMarkup = keyboard
+				msg.ParseMode = tgbotapi.ModeHTML
 				sendMessage(&msg)
 			} else {
 				// 创建添加关键字的事件
@@ -423,7 +428,7 @@ func splitAndClean(text string) []string {
 
 // sendMessage 发送消息
 func sendMessage(msg *tgbotapi.MessageConfig) {
-	msg.ParseMode = tgbotapi.ModeMarkdown
+	//msg.ParseMode = tgbotapi.ModeMarkdown
 	result, err := tgBot.Send(msg)
 	if err != nil {
 		log.WithField("msg", msg.Text).
@@ -503,7 +508,7 @@ func handleAdd(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, error
 				},
 			}
 
-			text := "🗑️" + v
+			text := "🗑️" + escapeButtonText(v)
 			keywords = append(keywords, tgbotapi.NewInlineKeyboardButtonData(text, data.Param()))
 		}
 		keyboard := tgbotapi.NewInlineKeyboardMarkup()
@@ -562,7 +567,6 @@ func handleDelete(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, er
 
 	exists.KeywordsArray = newWords
 	db.AddSubscribeConfig(exists)
-
 	return nil, nil
 }
 
@@ -650,4 +654,24 @@ func getPublicIP() string {
 
 func TgBotInstance() *tgbotapi.BotAPI {
 	return tgBot
+}
+
+func escapeButtonText(text string) string {
+	return text
+	//replacer := strings.NewReplacer(
+	//	"(", "\\(",
+	//	")", "\\)",
+	//	"[", "\\[",
+	//	"]", "\\]",
+	//	"?", "\\?",
+	//	".", "\\.",
+	//	"+", "\\+",
+	//	"*", "\\*",
+	//	"^", "\\^",
+	//	"$", "\\$",
+	//	"|", "\\|",
+	//	"{", "\\{",
+	//	"}", "\\}",
+	//)
+	//return replacer.Replace(text)
 }

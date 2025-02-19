@@ -7,18 +7,18 @@ import (
 type Event string
 
 const (
-	EventSelectFeed    Event = "feed.select"
-	EventBackToMain    Event = "back.to.main"
-	EventDeleteKeyword Event = "keyword.delete"
-	EventAddKeyword    Event = "keyword.add"
-	EventConfirmDelete Event = "keyword.confirm_delete"
-	EventOn            Event = "status.on"
-	EventOff           Event = "status.off"
+	EventSelectFeed    Event = "01"
+	EventBackToMain    Event = "02"
+	EventDeleteKeyword Event = "03"
+	EventAddKeyword    Event = "04"
+	EventConfirmDelete Event = "05"
+	EventOn            Event = "06"
+	EventOff           Event = "07"
 )
 
 type CallbackEvent[T CallbackData] struct {
 	Event string `json:"e"`
-	Data  T      `json:"d"`
+	Data  T      `json:"d,omitempty"`
 }
 
 func (c *CallbackEvent[T]) Param() string {
