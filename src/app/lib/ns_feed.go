@@ -7,12 +7,11 @@ import (
 	"strings"
 	"sync"
 	"time"
-
+	
 	"github.com/dlclark/regexp2"
 	"github.com/imroc/req/v3"
 	"github.com/matoous/go-nanoid/v2"
 	"github.com/mmcdole/gofeed"
-	log "github.com/sirupsen/logrus"
 	"github.com/thoas/go-funk"
 	"github.com/zeromicro/go-zero/core/collection"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -57,8 +56,8 @@ func NewNsFeed(ctx context.Context, svc *ServiceCtx, config *config.Config) *NsF
 
 func (f *NsFeed) SetBot(bot BotNotifier) *NsFeed {
 	f.bot = bot
-
-	f.q, _ = collection.NewTimingWheel(time.Second, 120, func(key, value any) {
+	
+	f.q, _ = collection.NewTimingWheel(time.Millisecond*100, 120, func(key, value any) {
 		if v, ok := value.(*NotifyMessage); ok {
 			bot.Notify(NotifyMessage{
 				Text:   v.Text,
@@ -66,13 +65,13 @@ func (f *NsFeed) SetBot(bot BotNotifier) *NsFeed {
 			})
 		}
 	})
-
+	
 	return f
 }
 
 func (f *NsFeed) Add(msg NotifyMessage) {
 	id, _ := gonanoid.New()
-	f.q.SetTimer(id, &msg, time.Second*3)
+	f.q.SetTimer(id, &msg, time.Millisecond*150)
 }
 
 func (f *NsFeed) Start() {
@@ -104,13 +103,13 @@ func (f *NsFeed) Start() {
 	//		}
 	//	}
 	//}()
-
+	
 	f.startAdaptiveFetch()
 }
 
 func hasKeywordWithRegex(title string, keyword string) bool {
 	//尝试转为正则
-	re, err := regexp2.Compile(keyword, regexp2.None)
+	re, err := regexp2.Compile(keyword, regexp2.IgnoreCase)
 	if err != nil {
 		return false
 	}
@@ -129,7 +128,7 @@ func hasKeyword(title string, keywords []string) bool {
 		go func() {
 			resultChan <- hasKeywordWithRegex(title, keyword)
 		}()
-
+		
 		// 只要有一个返回 true 就可以了
 		if <-resultChan || <-resultChan {
 			return true
@@ -148,24 +147,24 @@ func hasKeywordWithExpression(title string, keyword string) bool {
 	}
 	for _, orPart := range orParts {
 		orPart = strings.TrimSpace(orPart)
-
+		
 		// 处理与关系 (+) 和非关系 (~)
 		andParts := strings.Split(orPart, "+")
 		allAndPartsMatch := true
-
+		
 		for _, andPart := range andParts {
 			andPart = strings.TrimSpace(andPart)
-
+			
 			// 处理非关系 (~)
 			notParts := strings.Split(andPart, "~")
 			mainKeyword := strings.TrimSpace(notParts[0])
-
+			
 			// 检查主关键字是否存在
 			if !strings.Contains(title, mainKeyword) {
 				allAndPartsMatch = false
 				break
 			}
-
+			
 			// 检查排除关键字
 			for i := 1; i < len(notParts); i++ {
 				notKeyword := strings.TrimSpace(notParts[i])
@@ -174,12 +173,12 @@ func hasKeywordWithExpression(title string, keyword string) bool {
 					break
 				}
 			}
-
+			
 			if !allAndPartsMatch {
 				break
 			}
 		}
-
+		
 		// 如果所有 AND 条件都匹配，返回 true
 		if allAndPartsMatch {
 			return true
@@ -205,7 +204,7 @@ func removeHash(u string) (string, error) {
 }
 
 func (f *NsFeed) sendMessage(c *MessageOption, feedName string, items []*gofeed.Item) {
-
+	
 	for _, item := range items {
 		item.Link, _ = removeHash(item.Link)
 		if item.Link == "" {
@@ -213,7 +212,7 @@ func (f *NsFeed) sendMessage(c *MessageOption, feedName string, items []*gofeed.
 		}
 		exists := db.GetNotifyHistory(c.ChatId, item.Link) != nil
 		if hasKeyword(item.Title, c.Keywords) && !exists {
-
+			
 			db.AddNotifyHistory(&db.NotifyHistory{
 				ChatId: c.ChatId,
 				Url:    item.Link,
@@ -227,12 +226,12 @@ func (f *NsFeed) sendMessage(c *MessageOption, feedName string, items []*gofeed.
 						item.Link),
 					ChatId: &c.ChatId,
 				}
-
+				
 				f.bot.Notify(msg)
 			}
 		}
 	}
-
+	
 }
 
 var isRunning bool
@@ -251,7 +250,7 @@ func (f *NsFeed) loadRssData(url string, ctx context.Context) (*gofeed.Feed, err
 	if err != nil {
 		return nil, err
 	}
-
+	
 	return fp.ParseString(resp.String())
 }
 
@@ -265,7 +264,7 @@ func (f *NsFeed) fetchRss() {
 		isRunning = false
 	}()
 	feedCnf := db.ListAllFeedConfig()
-
+	
 	if len(feedCnf) == 0 {
 		f.logger.Errorw("fetch rss failed", logx.Field("err", "feed config is empty"))
 		return
@@ -278,7 +277,7 @@ func (f *NsFeed) fetchRss() {
 		wg.RunSafe(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-
+			
 			feed, err := f.loadRssData(cnf.FeedUrl, ctx)
 			if err != nil {
 				f.logger.Errorw("fetch rss failed", logx.Field("err", err), logx.Field("feedUrl", cnf.FeedUrl))
@@ -298,16 +297,16 @@ func (f *NsFeed) fetchRss() {
 		})
 	}
 	wg.Wait()
-
+	
 	subscribes := db.ListSubscribes()
 	subscribes = funk.Filter(subscribes, func(c *db.Subscribe) bool {
 		c.Status = strings.ToLower(c.Status)
 		c.Status = strings.TrimSpace(c.Status)
 		return c.Status == "on" || c.Status == ""
 	}).([]*db.Subscribe)
-
+	
 	var swg sync.WaitGroup
-
+	
 	for _, subscribe := range subscribes {
 		subscribe := subscribe
 		swg.Add(1)
@@ -321,7 +320,7 @@ func (f *NsFeed) fetchRss() {
 				if subKeys.ID == 0 {
 					continue
 				}
-
+				
 				f.sendMessage(&MessageOption{
 					ChatId:   subscribe.ChatId,
 					FeedName: fid,
@@ -333,65 +332,69 @@ func (f *NsFeed) fetchRss() {
 	swg.Wait()
 }
 
-func (f *NsFeed) adjustInterval(success bool) {
+func (f *NsFeed) adjustInterval(rss string, success bool) {
 	f.Lock()
 	defer f.Unlock()
-
+	l := logx.WithContext(context.Background()).WithFields(logx.Field("rss", rss))
 	if success {
 		f.failureCount = 0
 		f.successCount++
-
+		
 		// 连续成功10次后，尝试减少间隔
 		if f.successCount >= 10 {
 			newInterval := f.interval - (5 * time.Second)
 			if newInterval >= f.minInterval {
 				f.interval = newInterval
-				log.Infof("RSS请求稳定，减少间隔至 %v", f.interval)
+				l.Infow(fmt.Sprintf("RSS请求稳定，减少间隔至 %v", f.interval))
 			}
 			f.successCount = 0
 		}
 	} else {
 		f.successCount = 0
 		f.failureCount++
-
+		
 		// 失败后立即增加间隔
 		multiplier := float64(f.failureCount)
 		if multiplier > 4 {
 			multiplier = 4 // 限制最大倍数
 		}
-
+		
 		newInterval := time.Duration(float64(f.interval) * (1 + (0.5 * multiplier)))
 		if newInterval <= f.maxInterval {
 			f.interval = newInterval
-			log.Warnf("RSS请求失败，增加间隔至 %v", f.interval)
+			l.Infow(fmt.Sprintf("RSS请求失败，增加间隔至 %v", f.interval))
 		} else {
 			f.interval = f.maxInterval
-			log.Warnf("RSS请求达到最大间隔 %v", f.maxInterval)
+			l.Infow(fmt.Sprintf("RSS请求达到最大间隔 %v", f.maxInterval))
 		}
 	}
 }
 
-func (f *NsFeed) fetchRssAdaptive(feed *db.FeedConfig) {
+func (f *NsFeed) fetchRssAdaptive(feed *db.FeedConfig) error {
 	defer rescue.Recover()
-
+	
 	resp, err := f.loadRssData(feed.FeedUrl, f.ctx)
-
+	
 	if err != nil || resp == nil {
-		log.WithError(err).Error("获取RSS失败")
-		f.adjustInterval(false)
-		return
+		logx.Errorw("获取RSS失败",
+			logx.Field("err", err),
+			logx.Field("feedUrl", feed.FeedUrl),
+		)
+		
+		f.adjustInterval(feed.FeedUrl, false)
+		return err
 	}
-
+	
 	// 请求成功
-	f.adjustInterval(true)
-
+	f.adjustInterval(feed.FeedUrl, true)
+	
 	if len(resp.Items) == 0 {
-		return
+		return nil
 	}
-
+	
 	f.Lock()
 	defer f.Unlock()
-
+	
 	// 其他处理逻辑保持不变
 	subscribes := db.ListSubscribes()
 	subscribes = funk.Filter(subscribes, func(c *db.Subscribe) bool {
@@ -399,9 +402,9 @@ func (f *NsFeed) fetchRssAdaptive(feed *db.FeedConfig) {
 		c.Status = strings.TrimSpace(c.Status)
 		return c.Status == "on" || c.Status == ""
 	}).([]*db.Subscribe)
-
+	
 	var swg sync.WaitGroup
-
+	
 	for _, subscribe := range subscribes {
 		subscribe := subscribe
 		swg.Add(1)
@@ -415,7 +418,7 @@ func (f *NsFeed) fetchRssAdaptive(feed *db.FeedConfig) {
 				if subKeys.ID == 0 {
 					continue
 				}
-
+				
 				f.sendMessage(&MessageOption{
 					ChatId:   subscribe.ChatId,
 					FeedName: feed.Name,
@@ -425,24 +428,52 @@ func (f *NsFeed) fetchRssAdaptive(feed *db.FeedConfig) {
 		}()
 	}
 	swg.Wait()
+	return nil
 }
 
 func (f *NsFeed) startAdaptiveFetch() {
-	go func() {
-		defer func() {
-			rescue.Recover()
-		}()
-		for {
-			f.Lock()
-			currentInterval := f.interval
-			f.Unlock()
-
-			time.Sleep(currentInterval)
-
-			feeds := db.ListAllFeedConfig()
-			for _, feed := range feeds {
-				f.fetchRssAdaptive(&feed)
+	for _, feed := range db.ListAllFeedConfig() {
+		feed := feed // Create a new variable for the goroutine
+		go func() {
+			defer func() {
+				rescue.Recover()
+			}()
+			interval := 10 * time.Second
+			minInterval := 10 * time.Second
+			maxInterval := 5 * time.Minute
+			successCount := 0
+			failureCount := 0
+			for {
+				time.Sleep(interval)
+				ctx := logx.ContextWithFields(context.Background(), logx.Field("rss", feed.FeedUrl))
+				if err := f.fetchRssAdaptive(&feed); err != nil {
+					failureCount++
+					multiplier := float64(failureCount)
+					if multiplier > 4 {
+						multiplier = 4 // 限制最大倍数
+					}
+					
+					newInterval := time.Duration(float64(interval) * (1 + (0.5 * multiplier)))
+					if newInterval <= maxInterval {
+						interval = newInterval
+						logx.WithContext(ctx).Infow(fmt.Sprintf("RSS请求失败，增加间隔至 %v", interval))
+					} else {
+						interval = maxInterval
+						logx.WithContext(ctx).Infow(fmt.Sprintf("RSS请求达到最大间隔，增加间隔至 %v", maxInterval))
+					}
+				} else {
+					successCount++
+					if successCount >= 10 {
+						newInterval := interval - (5 * time.Second)
+						if newInterval >= minInterval {
+							interval = newInterval
+							logx.WithContext(ctx).Infow(fmt.Sprintf("RSS请求稳定，减少间隔至 %v", maxInterval))
+						}
+						successCount = 0
+					}
+					failureCount = 0
+				}
 			}
-		}
-	}()
+		}()
+	}
 }
