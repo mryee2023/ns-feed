@@ -7,18 +7,17 @@ import (
 	"strings"
 	"sync"
 	"time"
-	
+
+	"ns-rss/src/app/config"
+	"ns-rss/src/app/db"
+
 	"github.com/dlclark/regexp2"
 	"github.com/imroc/req/v3"
-	"github.com/matoous/go-nanoid/v2"
 	"github.com/mmcdole/gofeed"
 	"github.com/thoas/go-funk"
-	"github.com/zeromicro/go-zero/core/collection"
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/rescue"
 	"github.com/zeromicro/go-zero/core/threading"
-	"ns-rss/src/app/config"
-	"ns-rss/src/app/db"
 )
 
 //var history = make(map[int64]map[string]struct{})
@@ -32,7 +31,7 @@ type NsFeed struct {
 	svc          *ServiceCtx
 	logger       logx.Logger
 	bot          BotNotifier
-	q            *collection.TimingWheel
+	msgQueue     chan *NotifyMessage // 消息队列
 	Config       *config.Config
 	LastUpdate   time.Time
 	interval     time.Duration // 当前请求间隔
@@ -48,63 +47,60 @@ func NewNsFeed(ctx context.Context, svc *ServiceCtx, config *config.Config) *NsF
 		svc:         svc,
 		logger:      logx.WithContext(ctx).WithFields(logx.Field("lib", "ns_feed")),
 		Config:      config,
-		interval:    10 * time.Second, // 初始间隔
-		minInterval: 10 * time.Second, // 最小间隔
-		maxInterval: 5 * time.Minute,  // 最大间隔
+		interval:    10 * time.Second,                // 初始间隔
+		minInterval: 10 * time.Second,                // 最小间隔
+		maxInterval: 5 * time.Minute,                 // 最大间隔
+		msgQueue:    make(chan *NotifyMessage, 1000), // 创建消息队列，缓冲大小为1000
 	}
 }
 
 func (f *NsFeed) SetBot(bot BotNotifier) *NsFeed {
 	f.bot = bot
-	
-	f.q, _ = collection.NewTimingWheel(time.Millisecond*100, 120, func(key, value any) {
-		if v, ok := value.(*NotifyMessage); ok {
-			bot.Notify(NotifyMessage{
-				Text:   v.Text,
-				ChatId: v.ChatId,
-			})
-		}
-	})
-	
+
+	// 启动消息队列消费者
+	go f.startQueueConsumer()
+
 	return f
 }
 
-func (f *NsFeed) Add(msg NotifyMessage) {
-	id, _ := gonanoid.New()
-	f.q.SetTimer(id, &msg, time.Millisecond*150)
+// 启动消息队列消费者，控制消费速率为每秒20条消息
+func (f *NsFeed) startQueueConsumer() {
+	defer rescue.Recover()
+
+	f.logger.Infow("starting message queue consumer")
+
+	// 计算消息发送间隔，保证每秒最多发送20条消息
+	interval := time.Millisecond * 50 // 1000ms / 20 = 50ms
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-f.ctx.Done():
+			f.logger.Infow("message queue consumer stopped due to context done")
+			return
+		case msg := <-f.msgQueue:
+			<-ticker.C // 等待下一个时间点
+
+			// 直接发送消息，不使用时间轮
+			if msg != nil && f.bot != nil {
+				f.logger.Debugw("sending message from queue", logx.Field("chatId", msg.ChatId))
+				f.bot.Notify(*msg)
+			}
+		}
+	}
 }
 
-func (f *NsFeed) Start() {
-	defer func() {
-		rescue.Recover()
-	}()
-	f.logger.Infow("start ns feed......")
-	//
-	//ds, e := time.ParseDuration(f.svc.Config.FetchTimeInterval)
-	//if e != nil {
-	//	f.logger.Errorw("parse duration failed", logx.Field("err", e), logx.Field("FetchTimeInterval", f.svc.Config.FetchTimeInterval))
-	//	ds = 10 * time.Second
-	//}
-	//if ds < 10*time.Second {
-	//	ds = 10 * time.Second
-	//}
-	//go func() {
-	//	defer func() {
-	//		rescue.Recover()
-	//	}()
-	//	tk := time.NewTicker(ds)
-	//	defer tk.Stop()
-	//	for {
-	//		select {
-	//		case <-f.ctx.Done():
-	//			return
-	//		case <-tk.C:
-	//			f.fetchRss()
-	//		}
-	//	}
-	//}()
-	
-	f.startAdaptiveFetch()
+func (f *NsFeed) Add(msg NotifyMessage) {
+	// 将消息添加到队列
+	select {
+	case f.msgQueue <- &msg:
+		f.logger.Debugw("added message to queue", logx.Field("chatId", msg.ChatId))
+	default:
+		// 队列已满，记录日志
+		f.logger.Infow("message queue is full, message dropped", logx.Field("chatId", msg.ChatId))
+	}
 }
 
 func hasKeywordWithRegex(title string, keyword string) bool {
@@ -128,63 +124,113 @@ func hasKeyword(title string, keywords []string) bool {
 		go func() {
 			resultChan <- hasKeywordWithRegex(title, keyword)
 		}()
-		
-		// 只要有一个返回 true 就可以了
-		if <-resultChan || <-resultChan {
+		if result := <-resultChan; result {
+			return true
+		}
+
+		if result := <-resultChan; result {
 			return true
 		}
 	}
 	return false
 }
 
-func hasKeywordWithExpression(title string, keyword string) bool {
-	keyword = strings.Trim(keyword, "{}")
-	keyword = strings.ToLower(keyword)
-	// 处理或关系 (|)
-	orParts := strings.Split(keyword, "|")
-	if len(orParts) == 1 {
-		return strings.Contains(title, keyword)
-	}
+// matchExpression 匹配表达式函数
+// expr: 表达式字符串，支持 + (与), | (或), ~ (排除)
+// text: 要匹配的文本
+// 返回: 是否匹配的布尔值
+func matchExpression(expr, text string) bool {
+	// 首先处理 | (或) 运算符，将表达式按 | 分割
+	orParts := strings.Split(expr, "|")
+
+	// 任意一个 or 条件满足即返回 true
 	for _, orPart := range orParts {
-		orPart = strings.TrimSpace(orPart)
-		
-		// 处理与关系 (+) 和非关系 (~)
-		andParts := strings.Split(orPart, "+")
-		allAndPartsMatch := true
-		
-		for _, andPart := range andParts {
-			andPart = strings.TrimSpace(andPart)
-			
-			// 处理非关系 (~)
-			notParts := strings.Split(andPart, "~")
-			mainKeyword := strings.TrimSpace(notParts[0])
-			
-			// 检查主关键字是否存在
-			if !strings.Contains(title, mainKeyword) {
-				allAndPartsMatch = false
-				break
-			}
-			
-			// 检查排除关键字
-			for i := 1; i < len(notParts); i++ {
-				notKeyword := strings.TrimSpace(notParts[i])
-				if strings.Contains(title, notKeyword) {
-					allAndPartsMatch = false
-					break
-				}
-			}
-			
-			if !allAndPartsMatch {
-				break
-			}
-		}
-		
-		// 如果所有 AND 条件都匹配，返回 true
-		if allAndPartsMatch {
+		if matchAndExpression(strings.TrimSpace(orPart), text) {
 			return true
 		}
 	}
 	return false
+}
+
+// matchAndExpression 处理 + (与) 和 ~ (排除) 的逻辑
+func matchAndExpression(expr, text string) bool {
+	// 将表达式按 + 分割
+	andParts := strings.Split(expr, "+")
+
+	// 检查每个条件
+	for _, part := range andParts {
+		part = strings.TrimSpace(part)
+		if len(part) == 0 {
+			continue
+		}
+
+		// 处理排除(~)逻辑
+		if strings.HasPrefix(part, "~") {
+			excludeTerm := strings.TrimPrefix(part, "~")
+			if strings.Contains(text, excludeTerm) {
+				return false
+			}
+		} else {
+			// 处理包含逻辑
+			if !strings.Contains(text, part) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func hasKeywordWithExpression(title string, keyword string) bool {
+
+	return matchExpression(keyword, title)
+
+	// keyword = strings.Trim(keyword, "{}")
+	// keyword = strings.ToLower(keyword)
+	// // 处理或关系 (|)
+	// orParts := strings.Split(keyword, "|")
+	// if len(orParts) == 1 {
+	// 	return strings.Contains(title, keyword)
+	// }
+	// for _, orPart := range orParts {
+	// 	orPart = strings.TrimSpace(orPart)
+
+	// 	// 处理与关系 (+) 和非关系 (~)
+	// 	andParts := strings.Split(orPart, "+")
+	// 	allAndPartsMatch := true
+
+	// 	for _, andPart := range andParts {
+	// 		andPart = strings.TrimSpace(andPart)
+
+	// 		// 处理非关系 (~)
+	// 		notParts := strings.Split(andPart, "~")
+	// 		mainKeyword := strings.TrimSpace(notParts[0])
+
+	// 		// 检查主关键字是否存在
+	// 		if !strings.Contains(title, mainKeyword) {
+	// 			allAndPartsMatch = false
+	// 			break
+	// 		}
+
+	// 		// 检查排除关键字
+	// 		for i := 1; i < len(notParts); i++ {
+	// 			notKeyword := strings.TrimSpace(notParts[i])
+	// 			if strings.Contains(title, notKeyword) {
+	// 				allAndPartsMatch = false
+	// 				break
+	// 			}
+	// 		}
+
+	// 		if !allAndPartsMatch {
+	// 			break
+	// 		}
+	// 	}
+
+	// 	// 如果所有 AND 条件都匹配，返回 true
+	// 	if allAndPartsMatch {
+	// 		return true
+	// 	}
+	// }
+	// return false
 }
 
 type MessageOption struct {
@@ -204,7 +250,7 @@ func removeHash(u string) (string, error) {
 }
 
 func (f *NsFeed) sendMessage(c *MessageOption, feedName string, items []*gofeed.Item) {
-	
+
 	for _, item := range items {
 		item.Link, _ = removeHash(item.Link)
 		if item.Link == "" {
@@ -212,7 +258,7 @@ func (f *NsFeed) sendMessage(c *MessageOption, feedName string, items []*gofeed.
 		}
 		exists := db.GetNotifyHistory(c.ChatId, item.Link) != nil
 		if hasKeyword(item.Title, c.Keywords) && !exists {
-			
+
 			db.AddNotifyHistory(&db.NotifyHistory{
 				ChatId: c.ChatId,
 				Url:    item.Link,
@@ -226,12 +272,12 @@ func (f *NsFeed) sendMessage(c *MessageOption, feedName string, items []*gofeed.
 						item.Link),
 					ChatId: &c.ChatId,
 				}
-				
+
 				f.bot.Notify(msg)
 			}
 		}
 	}
-	
+
 }
 
 var isRunning bool
@@ -250,7 +296,7 @@ func (f *NsFeed) loadRssData(url string, ctx context.Context) (*gofeed.Feed, err
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return fp.ParseString(resp.String())
 }
 
@@ -264,7 +310,7 @@ func (f *NsFeed) fetchRss() {
 		isRunning = false
 	}()
 	feedCnf := db.ListAllFeedConfig()
-	
+
 	if len(feedCnf) == 0 {
 		f.logger.Errorw("fetch rss failed", logx.Field("err", "feed config is empty"))
 		return
@@ -277,7 +323,7 @@ func (f *NsFeed) fetchRss() {
 		wg.RunSafe(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			
+
 			feed, err := f.loadRssData(cnf.FeedUrl, ctx)
 			if err != nil {
 				f.logger.Errorw("fetch rss failed", logx.Field("err", err), logx.Field("feedUrl", cnf.FeedUrl))
@@ -297,16 +343,16 @@ func (f *NsFeed) fetchRss() {
 		})
 	}
 	wg.Wait()
-	
+
 	subscribes := db.ListSubscribes()
 	subscribes = funk.Filter(subscribes, func(c *db.Subscribe) bool {
 		c.Status = strings.ToLower(c.Status)
 		c.Status = strings.TrimSpace(c.Status)
 		return c.Status == "on" || c.Status == ""
 	}).([]*db.Subscribe)
-	
+
 	var swg sync.WaitGroup
-	
+
 	for _, subscribe := range subscribes {
 		subscribe := subscribe
 		swg.Add(1)
@@ -320,7 +366,7 @@ func (f *NsFeed) fetchRss() {
 				if subKeys.ID == 0 {
 					continue
 				}
-				
+
 				f.sendMessage(&MessageOption{
 					ChatId:   subscribe.ChatId,
 					FeedName: fid,
@@ -339,7 +385,7 @@ func (f *NsFeed) adjustInterval(rss string, success bool) {
 	if success {
 		f.failureCount = 0
 		f.successCount++
-		
+
 		// 连续成功10次后，尝试减少间隔
 		if f.successCount >= 10 {
 			newInterval := f.interval - (5 * time.Second)
@@ -352,13 +398,13 @@ func (f *NsFeed) adjustInterval(rss string, success bool) {
 	} else {
 		f.successCount = 0
 		f.failureCount++
-		
+
 		// 失败后立即增加间隔
 		multiplier := float64(f.failureCount)
 		if multiplier > 4 {
 			multiplier = 4 // 限制最大倍数
 		}
-		
+
 		newInterval := time.Duration(float64(f.interval) * (1 + (0.5 * multiplier)))
 		if newInterval <= f.maxInterval {
 			f.interval = newInterval
@@ -372,29 +418,29 @@ func (f *NsFeed) adjustInterval(rss string, success bool) {
 
 func (f *NsFeed) fetchRssAdaptive(feed *db.FeedConfig) error {
 	defer rescue.Recover()
-	
+
 	resp, err := f.loadRssData(feed.FeedUrl, f.ctx)
-	
+
 	if err != nil || resp == nil {
 		logx.Errorw("获取RSS失败",
 			logx.Field("err", err),
 			logx.Field("feedUrl", feed.FeedUrl),
 		)
-		
+
 		f.adjustInterval(feed.FeedUrl, false)
 		return err
 	}
-	
+
 	// 请求成功
 	f.adjustInterval(feed.FeedUrl, true)
-	
+
 	if len(resp.Items) == 0 {
 		return nil
 	}
-	
+
 	f.Lock()
 	defer f.Unlock()
-	
+
 	// 其他处理逻辑保持不变
 	subscribes := db.ListSubscribes()
 	subscribes = funk.Filter(subscribes, func(c *db.Subscribe) bool {
@@ -402,9 +448,9 @@ func (f *NsFeed) fetchRssAdaptive(feed *db.FeedConfig) error {
 		c.Status = strings.TrimSpace(c.Status)
 		return c.Status == "on" || c.Status == ""
 	}).([]*db.Subscribe)
-	
+
 	var swg sync.WaitGroup
-	
+
 	for _, subscribe := range subscribes {
 		subscribe := subscribe
 		swg.Add(1)
@@ -418,7 +464,7 @@ func (f *NsFeed) fetchRssAdaptive(feed *db.FeedConfig) error {
 				if subKeys.ID == 0 {
 					continue
 				}
-				
+
 				f.sendMessage(&MessageOption{
 					ChatId:   subscribe.ChatId,
 					FeedName: feed.Name,
@@ -452,7 +498,7 @@ func (f *NsFeed) startAdaptiveFetch() {
 					if multiplier > 4 {
 						multiplier = 4 // 限制最大倍数
 					}
-					
+
 					newInterval := time.Duration(float64(interval) * (1 + (0.5 * multiplier)))
 					if newInterval <= maxInterval {
 						interval = newInterval
@@ -476,4 +522,37 @@ func (f *NsFeed) startAdaptiveFetch() {
 			}
 		}()
 	}
+}
+
+func (f *NsFeed) Start() {
+	defer func() {
+		rescue.Recover()
+	}()
+	f.logger.Infow("start ns feed......")
+	//
+	//ds, e := time.ParseDuration(f.svc.Config.FetchTimeInterval)
+	//if e != nil {
+	//	f.logger.Errorw("parse duration failed", logx.Field("err", e), logx.Field("FetchTimeInterval", f.svc.Config.FetchTimeInterval))
+	//	ds = 10 * time.Second
+	//}
+	//if ds < 10*time.Second {
+	//	ds = 10 * time.Second
+	//}
+	//go func() {
+	//	defer func() {
+	//		rescue.Recover()
+	//	}()
+	//	tk := time.NewTicker(ds)
+	//	defer tk.Stop()
+	//	for {
+	//		select {
+	//		case <-f.ctx.Done():
+	//			return
+	//		case <-tk.C:
+	//			f.fetchRss()
+	//		}
+	//	}
+	//}()
+
+	f.startAdaptiveFetch()
 }
