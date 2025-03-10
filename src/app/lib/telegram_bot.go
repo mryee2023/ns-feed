@@ -480,16 +480,18 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 func ensureSubscriber(info *ChatInfo) *db.Subscribe {
 	subscriber := db.GetSubscribeWithChatId(info.ChatID)
 	if subscriber == nil {
-		tgBot.Send(tgbotapi.NewMessage(info.ChatID, "这是您的首次使用, 请用 /help 查看帮助说明。"))
-		db.AddSubscribe(&db.Subscribe{
+		newSubscriber := &db.Subscribe{
 			Name:      info.Name,
 			ChatId:    info.ChatID,
 			Status:    "on",
 			Type:      info.ChatType,
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
-		})
-		subscriber = db.GetSubscribeWithChatId(info.ChatID)
+		}
+		db.AddSubscribe(newSubscriber)
+		subscriber = newSubscriber
+		welcomeMsg := tgbotapi.NewMessage(info.ChatID, "这是您的首次使用, 请用 /help 查看帮助说明。")
+		sendMessage(&welcomeMsg)
 	}
 	return subscriber
 }
@@ -515,6 +517,8 @@ func splitAndClean(text string) []string {
 func sendMessage(msg *tgbotapi.MessageConfig) {
 	if msg.ParseMode == "" {
 		msg.ParseMode = tgbotapi.ModeMarkdown
+		// 如果使用Markdown模式，自动转义特殊字符
+		msg.Text = escapeMarkdown(msg.Text)
 	}
 	result, err := tgBot.Send(msg)
 	if err != nil {
@@ -760,4 +764,29 @@ func getPublicIP() string {
 
 func TgBotInstance() *tgbotapi.BotAPI {
 	return tgBot
+}
+
+// escapeMarkdown 转义Markdown特殊字符
+func escapeMarkdown(text string) string {
+	replacer := strings.NewReplacer(
+		"_", "\\_",
+		"*", "\\*",
+		"[", "\\[",
+		"]", "\\]",
+		"(", "\\(",
+		")", "\\)",
+		"~", "\\~",
+		"`", "\\`",
+		">", "\\>",
+		"#", "\\#",
+		"+", "\\+",
+		"-", "\\-",
+		"=", "\\=",
+		"|", "\\|",
+		"{", "\\{",
+		"}", "\\}",
+		".", "\\.",
+		"!", "\\!",
+	)
+	return replacer.Replace(text)
 }
