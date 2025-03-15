@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"ns-rss/src/app/db"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -68,8 +69,12 @@ func (t *TelegramNotifier) Notify(msg NotifyMessage) {
 	v, e := tg.Send(tgMsg)
 	if e != nil {
 		logx.Errorw("send telegram message failure", logx.Field("error", e), logx.Field("msg", msg.Text), logx.Field("chatId", tgMsg.ChatID))
+		if strings.Contains(e.Error(), "Forbidden") {
+			db.DeleteSubscribe(tgMsg.ChatID)
+
+		}
 	} else {
-		logx.Infow("send telegram message success", logx.Field("result", v.MessageID), logx.Field("msg", msg.Text), logx.Field("chatId", tgMsg.ChatID))
+		logx.Debugw("send telegram message success", logx.Field("result", v.MessageID), logx.Field("msg", msg.Text), logx.Field("chatId", tgMsg.ChatID))
 	}
 
 }

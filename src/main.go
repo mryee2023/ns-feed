@@ -5,7 +5,6 @@ import (
 	"flag"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	_ "net/http/pprof"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/golang-module/carbon/v2"
 	log "github.com/sirupsen/logrus"
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/proc"
 	"github.com/zeromicro/go-zero/core/rescue"
 	"gopkg.in/yaml.v3"
@@ -42,14 +42,6 @@ var (
 	port = flag.String("port", ":8080", "HTTP服务端口")
 )
 
-func getAbsolutePath() string {
-	exe, err := os.Executable()
-	if err != nil {
-		log.Fatalf("os.Executable() failed: %v", err)
-	}
-	return filepath.Dir(exe)
-}
-
 func main() {
 	flag.Parse()
 
@@ -59,6 +51,7 @@ func main() {
 	})
 
 	log.SetLevel(log.InfoLevel)
+	logx.SetLevel(logx.InfoLevel)
 	carbon.SetDefault(carbon.Default{
 		Layout:       carbon.DateTimeLayout,
 		Timezone:     carbon.PRC,
@@ -139,10 +132,7 @@ func main() {
 	// 初始化服务
 	lib.InitTgBotListen(&config)
 	svc := lib.NewServiceCtx(lib.TgBotInstance(), &config)
-	// 在 main 函数中添加
-	go func() {
-		log.Println(http.ListenAndServe(":6060", nil))
-	}()
+
 	// 启动RSS抓取
 	go func() {
 		if !config.Online {

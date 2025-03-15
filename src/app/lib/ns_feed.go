@@ -17,7 +17,6 @@ import (
 	"github.com/thoas/go-funk"
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/rescue"
-	"github.com/zeromicro/go-zero/core/threading"
 )
 
 //var history = make(map[int64]map[string]struct{})
@@ -67,7 +66,7 @@ func (f *NsFeed) SetBot(bot BotNotifier) *NsFeed {
 func (f *NsFeed) startQueueConsumer() {
 	defer rescue.Recover()
 
-	f.logger.Infow("starting message queue consumer with batching")
+	f.logger.Debugw("starting message queue consumer with batching")
 
 	// 计算消息发送间隔，保证每秒最多发送20条消息
 	const interval = time.Millisecond * 50     // 1000ms / 20 = 50ms
@@ -84,7 +83,7 @@ func (f *NsFeed) startQueueConsumer() {
 	for {
 		select {
 		case <-f.ctx.Done():
-			f.logger.Infow("message queue consumer stopped due to context done")
+			f.logger.Debugw("message queue consumer stopped due to context done")
 			return
 
 		case msg := <-f.msgQueue:
@@ -152,16 +151,6 @@ func (f *NsFeed) Add(msg NotifyMessage) {
 		// 队列已满，记录日志
 		f.logger.Infow("message queue is full, message dropped", logx.Field("chatId", msg.ChatId))
 	}
-}
-
-func hasKeywordWithRegex(title string, keyword string) bool {
-	//尝试转为正则
-	re, err := regexp2.Compile(keyword, regexp2.IgnoreCase)
-	if err != nil {
-		return false
-	}
-	r, _ := re.MatchString(title)
-	return r
 }
 
 // 使用缓存存储已编译的正则表达式
@@ -268,53 +257,6 @@ func hasKeywordWithExpression(title string, keyword string) bool {
 
 	return matchExpression(keyword, title)
 
-	// keyword = strings.Trim(keyword, "{}")
-	// keyword = strings.ToLower(keyword)
-	// // 处理或关系 (|)
-	// orParts := strings.Split(keyword, "|")
-	// if len(orParts) == 1 {
-	// 	return strings.Contains(title, keyword)
-	// }
-	// for _, orPart := range orParts {
-	// 	orPart = strings.TrimSpace(orPart)
-
-	// 	// 处理与关系 (+) 和非关系 (~)
-	// 	andParts := strings.Split(orPart, "+")
-	// 	allAndPartsMatch := true
-
-	// 	for _, andPart := range andParts {
-	// 		andPart = strings.TrimSpace(andPart)
-
-	// 		// 处理非关系 (~)
-	// 		notParts := strings.Split(andPart, "~")
-	// 		mainKeyword := strings.TrimSpace(notParts[0])
-
-	// 		// 检查主关键字是否存在
-	// 		if !strings.Contains(title, mainKeyword) {
-	// 			allAndPartsMatch = false
-	// 			break
-	// 		}
-
-	// 		// 检查排除关键字
-	// 		for i := 1; i < len(notParts); i++ {
-	// 			notKeyword := strings.TrimSpace(notParts[i])
-	// 			if strings.Contains(title, notKeyword) {
-	// 				allAndPartsMatch = false
-	// 				break
-	// 			}
-	// 		}
-
-	// 		if !allAndPartsMatch {
-	// 			break
-	// 		}
-	// 	}
-
-	// 	// 如果所有 AND 条件都匹配，返回 true
-	// 	if allAndPartsMatch {
-	// 		return true
-	// 	}
-	// }
-	// return false
 }
 
 type MessageOption struct {
@@ -419,123 +361,6 @@ func (f *NsFeed) loadRssData(url string, ctx context.Context) (*gofeed.Feed, err
 	}
 
 	return fp.ParseString(resp.String())
-}
-
-func (f *NsFeed) fetchRss() {
-	if isRunning {
-		fmt.Println("fetch rss is running")
-		return
-	}
-	isRunning = true
-	defer func() {
-		isRunning = false
-	}()
-	feedCnf := db.ListAllFeedConfig()
-
-	if len(feedCnf) == 0 {
-		f.logger.Errorw("fetch rss failed", logx.Field("err", "feed config is empty"))
-		return
-	}
-
-	// 第一步：抓取所有RSS源的数据
-	feedItems := make(map[string][]*gofeed.Item)
-	var mux sync.Mutex
-	var wg threading.RoutineGroup
-	for _, cnf := range feedCnf {
-		cnf := cnf
-		wg.RunSafe(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			feed, err := f.loadRssData(cnf.FeedUrl, ctx)
-			if err != nil {
-				f.logger.Errorw("fetch rss failed", logx.Field("err", err), logx.Field("feedUrl", cnf.FeedUrl))
-				return
-			}
-			if feed == nil {
-				f.logger.Errorw("fetch rss failed", logx.Field("err", "feed is nil"), logx.Field("feedUrl", cnf.FeedUrl))
-				return
-			}
-			var items []*gofeed.Item
-			for _, item := range feed.Items {
-				items = append(items, item)
-			}
-			mux.Lock()
-			feedItems[cnf.FeedId] = items
-			mux.Unlock()
-		})
-	}
-	wg.Wait()
-
-	// 第二步：获取所有活跃订阅
-	subscribes := db.ListSubscribes()
-	subscribes = funk.Filter(subscribes, func(c *db.Subscribe) bool {
-		c.Status = strings.ToLower(c.Status)
-		c.Status = strings.TrimSpace(c.Status)
-		return c.Status == "on" || c.Status == ""
-	}).([]*db.Subscribe)
-
-	// 第三步：使用工作池模式处理订阅消息
-	// 创建任务通道
-	type subscribeTask struct {
-		subscribe *db.Subscribe
-		feedId    string
-		items     []*gofeed.Item
-	}
-
-	// 估算任务总数
-	taskCount := 0
-	for range subscribes {
-		for range feedItems {
-			taskCount++
-		}
-	}
-
-	// 创建任务通道，缓冲大小为任务总数
-	taskChan := make(chan subscribeTask, taskCount)
-
-	// 创建工作池
-	const workerCount = 5 // 工作协程数量，可以根据实际情况调整
-	var workerWg sync.WaitGroup
-
-	// 启动工作协程
-	for i := 0; i < workerCount; i++ {
-		workerWg.Add(1)
-		go func() {
-			defer workerWg.Done()
-			defer rescue.Recover()
-
-			for task := range taskChan {
-				subKeys := db.ListSubscribeFeedWith(task.subscribe.ChatId, task.feedId)
-				if subKeys.ID == 0 {
-					continue
-				}
-
-				f.sendMessage(&MessageOption{
-					ChatId:   task.subscribe.ChatId,
-					FeedName: task.feedId,
-					Keywords: subKeys.KeywordsArray,
-				}, task.feedId, task.items)
-			}
-		}()
-	}
-
-	// 分发任务
-	for _, subscribe := range subscribes {
-		for feedId, items := range feedItems {
-			taskChan <- subscribeTask{
-				subscribe: subscribe,
-				feedId:    feedId,
-				items:     items,
-			}
-		}
-	}
-
-	// 关闭任务通道，表示没有更多任务
-	close(taskChan)
-
-	// 等待所有工作协程完成
-	workerWg.Wait()
 }
 
 func (f *NsFeed) adjustInterval(rss string, success bool) {
@@ -793,30 +618,6 @@ func (f *NsFeed) Start() {
 		rescue.Recover()
 	}()
 	f.logger.Infow("start ns feed......")
-	//
-	//ds, e := time.ParseDuration(f.svc.Config.FetchTimeInterval)
-	//if e != nil {
-	//	f.logger.Errorw("parse duration failed", logx.Field("err", e), logx.Field("FetchTimeInterval", f.svc.Config.FetchTimeInterval))
-	//	ds = 10 * time.Second
-	//}
-	//if ds < 10*time.Second {
-	//	ds = 10 * time.Second
-	//}
-	//go func() {
-	//	defer func() {
-	//		rescue.Recover()
-	//	}()
-	//	tk := time.NewTicker(ds)
-	//	defer tk.Stop()
-	//	for {
-	//		select {
-	//		case <-f.ctx.Done():
-	//			return
-	//		case <-tk.C:
-	//			f.fetchRss()
-	//		}
-	//	}
-	//}()
 
 	f.startAdaptiveFetch()
 }
