@@ -10,16 +10,17 @@ import (
 
 	_ "net/http/pprof"
 
-	"github.com/golang-module/carbon/v2"
-	log "github.com/sirupsen/logrus"
-	"github.com/zeromicro/go-zero/core/proc"
-	"github.com/zeromicro/go-zero/core/rescue"
-	"gopkg.in/yaml.v3"
 	"ns-rss/src/app"
 	"ns-rss/src/app/bot_http"
 	config2 "ns-rss/src/app/config"
 	"ns-rss/src/app/db"
 	"ns-rss/src/app/lib"
+
+	"github.com/golang-module/carbon/v2"
+	log "github.com/sirupsen/logrus"
+	"github.com/zeromicro/go-zero/core/proc"
+	"github.com/zeromicro/go-zero/core/rescue"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -138,14 +139,17 @@ func main() {
 	// 初始化服务
 	lib.InitTgBotListen(&config)
 	svc := lib.NewServiceCtx(lib.TgBotInstance(), &config)
-
+	// 在 main 函数中添加
+	go func() {
+		log.Println(http.ListenAndServe(":6060", nil))
+	}()
 	// 启动RSS抓取
 	go func() {
 		if !config.Online {
 			log.Info("NodeSeek Feed服务已离线")
 			return
 		}
-		feeder := lib.NewNsFeed(context.Background(), svc)
+		feeder := lib.NewNsFeed(context.Background(), svc, &config)
 		feeder.SetBot(app.GetBotInstance())
 		feeder.Start()
 	}()
@@ -162,4 +166,5 @@ func main() {
 	if err := http.ListenAndServe(*port, nil); err != nil {
 		log.Fatalf("start web server failure : %v", err)
 	}
+
 }

@@ -14,6 +14,7 @@ const (
 	EventConfirmDelete Event = "5"
 	EventOn            Event = "6"
 	EventOff           Event = "7"
+	EventStatus        Event = "8"
 )
 
 type CallbackEvent[T CallbackData] struct {
@@ -88,4 +89,12 @@ type CallbackStatusOff struct {
 
 func (c CallbackStatusOff) Method() string {
 	return string(EventOff)
+}
+
+type CallbackStatus struct {
+	ChatId int64 `json:"c"`
+}
+
+func (c CallbackStatus) Method() string {
+	return string(EventStatus)
 }
