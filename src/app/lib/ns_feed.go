@@ -72,22 +72,62 @@ func (f *NsFeed) startQueueConsumer() {
 	// 计算消息发送间隔，保证每秒最多发送20条消息
 	interval := time.Millisecond * 50 // 1000ms / 20 = 50ms
 
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	// 使用动态 ticker 模式，只在有消息时才激活 ticker
+	var ticker *time.Ticker
+	var tickerC <-chan time.Time
+
+	// 用于限制发送速率的时间点
+	var nextSendTime time.Time
 
 	for {
 		select {
 		case <-f.ctx.Done():
 			f.logger.Infow("message queue consumer stopped due to context done")
-			return
-		case msg := <-f.msgQueue:
-			<-ticker.C // 等待下一个时间点
-
-			// 直接发送消息，不使用时间轮
-			if msg != nil && f.bot != nil {
-				f.logger.Debugw("sending message from queue", logx.Field("chatId", msg.ChatId))
-				f.bot.Notify(*msg)
+			if ticker != nil {
+				ticker.Stop()
 			}
+			return
+
+		case msg := <-f.msgQueue:
+			// 只有在收到消息时才创建或使用 ticker
+			now := time.Now()
+
+			// 如果已经到了可以发送的时间，直接发送
+			if now.After(nextSendTime) {
+				if msg != nil && f.bot != nil {
+					f.logger.Debugw("sending message from queue immediately", logx.Field("chatId", msg.ChatId))
+					f.bot.Notify(*msg)
+					nextSendTime = now.Add(interval)
+				}
+				continue
+			}
+
+			// 如果还没到发送时间，需要等待
+			if ticker == nil {
+				ticker = time.NewTicker(interval)
+				tickerC = ticker.C
+			}
+
+			// 等待发送时间
+			select {
+			case <-tickerC:
+				if msg != nil && f.bot != nil {
+					f.logger.Debugw("sending message from queue after wait", logx.Field("chatId", msg.ChatId))
+					f.bot.Notify(*msg)
+					nextSendTime = time.Now().Add(interval)
+				}
+			case <-f.ctx.Done():
+				f.logger.Infow("message queue consumer stopped during wait")
+				ticker.Stop()
+				return
+			}
+		}
+
+		// 如果队列为空，停止 ticker 以节省资源
+		if len(f.msgQueue) == 0 && ticker != nil {
+			ticker.Stop()
+			ticker = nil
+			tickerC = nil
 		}
 	}
 }
@@ -113,22 +153,44 @@ func hasKeywordWithRegex(title string, keyword string) bool {
 	return r
 }
 
+// 使用缓存存储已编译的正则表达式
+var regexCache = sync.Map{}
+
+// 获取缓存的正则表达式
+func getCachedRegex(keyword string) (*regexp2.Regexp, bool) {
+	if re, ok := regexCache.Load(keyword); ok {
+		return re.(*regexp2.Regexp), true
+	}
+
+	re, err := regexp2.Compile(keyword, regexp2.IgnoreCase)
+	if err != nil {
+		return nil, false
+	}
+
+	regexCache.Store(keyword, re)
+	return re, true
+}
+
+// 优化后的正则匹配函数
+func hasKeywordWithRegexCached(title string, keyword string) bool {
+	re, ok := getCachedRegex(keyword)
+	if !ok {
+		return false
+	}
+	r, _ := re.MatchString(title)
+	return r
+}
+
 func hasKeyword(title string, keywords []string) bool {
 	title = strings.ToLower(title)
 	for _, keyword := range keywords {
-		resultChan := make(chan bool, 2)
-		// 并行执行两个检查函数
-		go func() {
-			resultChan <- hasKeywordWithExpression(title, keyword)
-		}()
-		go func() {
-			resultChan <- hasKeywordWithRegex(title, keyword)
-		}()
-		if result := <-resultChan; result {
+		// 首先尝试表达式匹配，这通常更快
+		if hasKeywordWithExpression(title, keyword) {
 			return true
 		}
 
-		if result := <-resultChan; result {
+		// 如果表达式匹配失败，再尝试正则匹配
+		if hasKeywordWithRegexCached(title, keyword) {
 			return true
 		}
 	}
@@ -315,6 +377,8 @@ func (f *NsFeed) fetchRss() {
 		f.logger.Errorw("fetch rss failed", logx.Field("err", "feed config is empty"))
 		return
 	}
+
+	// 第一步：抓取所有RSS源的数据
 	feedItems := make(map[string][]*gofeed.Item)
 	var mux sync.Mutex
 	var wg threading.RoutineGroup
@@ -344,6 +408,7 @@ func (f *NsFeed) fetchRss() {
 	}
 	wg.Wait()
 
+	// 第二步：获取所有活跃订阅
 	subscribes := db.ListSubscribes()
 	subscribes = funk.Filter(subscribes, func(c *db.Subscribe) bool {
 		c.Status = strings.ToLower(c.Status)
@@ -351,31 +416,67 @@ func (f *NsFeed) fetchRss() {
 		return c.Status == "on" || c.Status == ""
 	}).([]*db.Subscribe)
 
-	var swg sync.WaitGroup
+	// 第三步：使用工作池模式处理订阅消息
+	// 创建任务通道
+	type subscribeTask struct {
+		subscribe *db.Subscribe
+		feedId    string
+		items     []*gofeed.Item
+	}
 
-	for _, subscribe := range subscribes {
-		subscribe := subscribe
-		swg.Add(1)
+	// 估算任务总数
+	taskCount := 0
+	for range subscribes {
+		for range feedItems {
+			taskCount++
+		}
+	}
+
+	// 创建任务通道，缓冲大小为任务总数
+	taskChan := make(chan subscribeTask, taskCount)
+
+	// 创建工作池
+	const workerCount = 5 // 工作协程数量，可以根据实际情况调整
+	var workerWg sync.WaitGroup
+
+	// 启动工作协程
+	for i := 0; i < workerCount; i++ {
+		workerWg.Add(1)
 		go func() {
-			defer func() {
-				swg.Done()
-				rescue.Recover()
-			}()
-			for fid, items := range feedItems {
-				subKeys := db.ListSubscribeFeedWith(subscribe.ChatId, fid)
+			defer workerWg.Done()
+			defer rescue.Recover()
+
+			for task := range taskChan {
+				subKeys := db.ListSubscribeFeedWith(task.subscribe.ChatId, task.feedId)
 				if subKeys.ID == 0 {
 					continue
 				}
 
 				f.sendMessage(&MessageOption{
-					ChatId:   subscribe.ChatId,
-					FeedName: fid,
+					ChatId:   task.subscribe.ChatId,
+					FeedName: task.feedId,
 					Keywords: subKeys.KeywordsArray,
-				}, fid, items)
+				}, task.feedId, task.items)
 			}
 		}()
 	}
-	swg.Wait()
+
+	// 分发任务
+	for _, subscribe := range subscribes {
+		for feedId, items := range feedItems {
+			taskChan <- subscribeTask{
+				subscribe: subscribe,
+				feedId:    feedId,
+				items:     items,
+			}
+		}
+	}
+
+	// 关闭任务通道，表示没有更多任务
+	close(taskChan)
+
+	// 等待所有工作协程完成
+	workerWg.Wait()
 }
 
 func (f *NsFeed) adjustInterval(rss string, success bool) {
@@ -441,7 +542,7 @@ func (f *NsFeed) fetchRssAdaptive(feed *db.FeedConfig) error {
 	f.Lock()
 	defer f.Unlock()
 
-	// 其他处理逻辑保持不变
+	// 获取所有活跃订阅
 	subscribes := db.ListSubscribes()
 	subscribes = funk.Filter(subscribes, func(c *db.Subscribe) bool {
 		c.Status = strings.ToLower(c.Status)
@@ -449,79 +550,181 @@ func (f *NsFeed) fetchRssAdaptive(feed *db.FeedConfig) error {
 		return c.Status == "on" || c.Status == ""
 	}).([]*db.Subscribe)
 
-	var swg sync.WaitGroup
+	// 使用工作池模式处理订阅消息
+	// 创建任务通道
+	type subscribeTask struct {
+		subscribe *db.Subscribe
+		item      *gofeed.Item
+	}
 
-	for _, subscribe := range subscribes {
-		subscribe := subscribe
-		swg.Add(1)
+	// 估算任务总数
+	taskCount := len(subscribes) * len(resp.Items)
+	if taskCount == 0 {
+		return nil
+	}
+
+	// 创建任务通道，缓冲大小为任务总数
+	taskChan := make(chan subscribeTask, taskCount)
+
+	// 创建工作池
+	const workerCount = 5 // 工作协程数量，可以根据实际情况调整
+	var workerWg sync.WaitGroup
+
+	// 启动工作协程
+	for i := 0; i < workerCount; i++ {
+		workerWg.Add(1)
 		go func() {
-			defer func() {
-				swg.Done()
-				rescue.Recover()
-			}()
-			for _, items := range resp.Items {
-				subKeys := db.ListSubscribeFeedWith(subscribe.ChatId, feed.FeedId)
+			defer workerWg.Done()
+			defer rescue.Recover()
+
+			for task := range taskChan {
+				subKeys := db.ListSubscribeFeedWith(task.subscribe.ChatId, feed.FeedId)
 				if subKeys.ID == 0 {
 					continue
 				}
 
 				f.sendMessage(&MessageOption{
-					ChatId:   subscribe.ChatId,
+					ChatId:   task.subscribe.ChatId,
 					FeedName: feed.Name,
 					Keywords: subKeys.KeywordsArray,
-				}, feed.Name, []*gofeed.Item{items})
+				}, feed.Name, []*gofeed.Item{task.item})
 			}
 		}()
 	}
-	swg.Wait()
+
+	// 分发任务
+	for _, subscribe := range subscribes {
+		for _, item := range resp.Items {
+			taskChan <- subscribeTask{
+				subscribe: subscribe,
+				item:      item,
+			}
+		}
+	}
+
+	// 关闭任务通道，表示没有更多任务
+	close(taskChan)
+
+	// 等待所有工作协程完成
+	workerWg.Wait()
+
 	return nil
 }
 
 func (f *NsFeed) startAdaptiveFetch() {
+	// 创建一个工作池来处理RSS源的抓取
+	const workerCount = 3 // 工作协程数量，可以根据实际情况调整
+
+	// 创建任务通道
+	type fetchTask struct {
+		feed          db.FeedConfig
+		interval      time.Duration
+		minInterval   time.Duration
+		maxInterval   time.Duration
+		successCount  int
+		failureCount  int
+		nextFetchTime time.Time
+	}
+
+	// 初始化任务列表
+	var tasks []fetchTask
 	for _, feed := range db.ListAllFeedConfig() {
-		feed := feed // Create a new variable for the goroutine
-		go func() {
-			defer func() {
-				rescue.Recover()
-			}()
-			interval := 10 * time.Second
-			minInterval := 10 * time.Second
-			maxInterval := 5 * time.Minute
-			successCount := 0
-			failureCount := 0
-			for {
-				time.Sleep(interval)
-				ctx := logx.ContextWithFields(context.Background(), logx.Field("rss", feed.FeedUrl))
-				if err := f.fetchRssAdaptive(&feed); err != nil {
-					failureCount++
-					multiplier := float64(failureCount)
-					if multiplier > 4 {
-						multiplier = 4 // 限制最大倍数
+		tasks = append(tasks, fetchTask{
+			feed:          feed,
+			interval:      10 * time.Second,
+			minInterval:   10 * time.Second,
+			maxInterval:   5 * time.Minute,
+			successCount:  0,
+			failureCount:  0,
+			nextFetchTime: time.Now(),
+		})
+	}
+
+	// 启动调度器
+	go func() {
+		defer rescue.Recover()
+
+		// 创建任务通道
+		taskChan := make(chan *fetchTask, len(tasks))
+
+		// 启动工作协程
+		var wg sync.WaitGroup
+		for i := 0; i < workerCount; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer rescue.Recover()
+
+				for task := range taskChan {
+					ctx := logx.ContextWithFields(context.Background(), logx.Field("rss", task.feed.FeedUrl))
+
+					if err := f.fetchRssAdaptive(&task.feed); err != nil {
+						task.failureCount++
+						task.successCount = 0
+
+						multiplier := float64(task.failureCount)
+						if multiplier > 4 {
+							multiplier = 4 // 限制最大倍数
+						}
+
+						newInterval := time.Duration(float64(task.interval) * (1 + (0.5 * multiplier)))
+						if newInterval <= task.maxInterval {
+							task.interval = newInterval
+							logx.WithContext(ctx).Infow(fmt.Sprintf("RSS请求失败，增加间隔至 %v", task.interval))
+						} else {
+							task.interval = task.maxInterval
+							logx.WithContext(ctx).Infow(fmt.Sprintf("RSS请求达到最大间隔 %v", task.maxInterval))
+						}
+					} else {
+						task.failureCount = 0
+						task.successCount++
+
+						if task.successCount >= 10 {
+							newInterval := task.interval - (5 * time.Second)
+							if newInterval >= task.minInterval {
+								task.interval = newInterval
+								logx.WithContext(ctx).Infow(fmt.Sprintf("RSS请求稳定，减少间隔至 %v", task.interval))
+							}
+							task.successCount = 0
+						}
 					}
 
-					newInterval := time.Duration(float64(interval) * (1 + (0.5 * multiplier)))
-					if newInterval <= maxInterval {
-						interval = newInterval
-						logx.WithContext(ctx).Infow(fmt.Sprintf("RSS请求失败，增加间隔至 %v", interval))
-					} else {
-						interval = maxInterval
-						logx.WithContext(ctx).Infow(fmt.Sprintf("RSS请求达到最大间隔，增加间隔至 %v", maxInterval))
-					}
-				} else {
-					successCount++
-					if successCount >= 10 {
-						newInterval := interval - (5 * time.Second)
-						if newInterval >= minInterval {
-							interval = newInterval
-							logx.WithContext(ctx).Infow(fmt.Sprintf("RSS请求稳定，减少间隔至 %v", maxInterval))
+					// 更新下次抓取时间
+					task.nextFetchTime = time.Now().Add(task.interval)
+				}
+			}()
+		}
+
+		// 主循环，调度任务
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-f.ctx.Done():
+				close(taskChan)
+				wg.Wait()
+				return
+
+			case <-ticker.C:
+				now := time.Now()
+
+				// 检查每个任务，如果到了执行时间就发送到任务通道
+				for i := range tasks {
+					if now.After(tasks[i].nextFetchTime) {
+						select {
+						case taskChan <- &tasks[i]:
+							// 临时设置下次执行时间为很久以后，防止重复调度
+							// 实际的下次执行时间会在任务完成后更新
+							tasks[i].nextFetchTime = now.Add(24 * time.Hour)
+						default:
+							// 任务通道已满，跳过
 						}
-						successCount = 0
 					}
-					failureCount = 0
 				}
 			}
-		}()
-	}
+		}
+	}()
 }
 
 func (f *NsFeed) Start() {
