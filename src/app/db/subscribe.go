@@ -52,7 +52,11 @@ var db *gorm.DB
 // InitDB initializes the database connection
 func InitDB(dbPath string) error {
 	var err error
-	db, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+
+	// 添加 SQLite 性能优化参数
+	dsn := dbPath + "?_journal=WAL&_synchronous=NORMAL&_cache_size=-64000&_foreign_keys=ON"
+
+	db, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
 		Logger: logger.New(
 			log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer
@@ -64,10 +68,22 @@ func InitDB(dbPath string) error {
 				Colorful:                  false,         // Disable color
 			},
 		),
+		PrepareStmt: true, // 缓存预编译语句
 	})
 	if err != nil {
 		return err
 	}
+
+	// 设置连接池
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+
+	// 设置连接池参数
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(100)
+	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	// Auto migrate the schema
 	err = db.AutoMigrate(&Subscribe{}, &NotifyHistory{}, &FeedConfig{}, &SubscribeConfig{})
@@ -77,7 +93,6 @@ func InitDB(dbPath string) error {
 
 	//默认添加ns
 	var ns = FeedConfig{
-
 		Name:    "NodeSeek",
 		FeedUrl: "https://rss.nodeseek.com",
 		FeedId:  "ns",

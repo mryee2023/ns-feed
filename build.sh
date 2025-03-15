@@ -30,7 +30,8 @@ done
 # 检查是否安装了必要的交叉编译工具
 check_cross_compile_tools() {
     if ! command -v docker &> /dev/null; then
-        echo "Warning: Docker is not installed. Will try to build without Docker."
+        echo "Error: Docker is required for cross-compilation"
+        exit 1
     fi
 }
 
@@ -43,85 +44,41 @@ build_with_docker() {
         OUTPUT_NAME+=".exe"
     fi
 
-    echo "Building for $GOOS/$GOARCH..."
+    echo "Building for $GOOS/$GOARCH using Docker..."
 
     # 确保 bin 目录存在
     mkdir -p bin
     
-    # 检查是否有Docker
-    if command -v docker &> /dev/null; then
-        if [ "$GOOS" == "linux" ]; then
-            echo "Building Linux binary using Docker..."
-            # 使用更简单的Docker命令，避免依赖特定的交叉编译工具
-            docker run --rm \
-                -v $(pwd):/app \
-                -w /app \
-                -e CGO_ENABLED=1 \
-                -e GOOS=linux \
-                -e GOARCH=amd64 \
-                golang:1.21 \
-                bash -c "apt-get update && apt-get install -y gcc libc6-dev && go build -o ./bin/$OUTPUT_NAME ./src/main.go"
-        elif [ "$GOOS" == "darwin" ]; then
-            echo "Building macOS binary using Docker..."
-            # 对于macOS，使用Docker但禁用CGO
-            docker run --rm \
-                -v $(pwd):/app \
-                -w /app \
-                -e CGO_ENABLED=0 \
-                -e GOOS=darwin \
-                -e GOARCH=amd64 \
-                golang:1.21 \
-                go build -o ./bin/$OUTPUT_NAME ./src/main.go
-        else
-            echo "Building Windows binary using Docker..."
-            # Windows构建
-            docker run --rm \
-                -v $(pwd):/app \
-                -w /app \
-                -e CGO_ENABLED=0 \
-                -e GOOS=windows \
-                -e GOARCH=amd64 \
-                golang:1.21 \
-                go build -o ./bin/$OUTPUT_NAME ./src/main.go
-        fi
+    if [ "$GOOS" == "linux" ]; then
+        # 使用特定的Docker镜像进行Linux构建
+        docker run --rm \
+            -v $(pwd):/src \
+            -w /src \
+            -e CGO_ENABLED=1 \
+            -e GOOS=linux \
+            -e GOARCH=amd64 \
+            -e CC=x86_64-linux-gnu-gcc \
+            -e CXX=x86_64-linux-gnu-g++ \
+            golang:1.22 \
+            bash -c "apt-get update && apt-get install -y gcc-x86-64-linux-gnu g++-x86-64-linux-gnu libc6-dev-amd64-cross && go build -o ./bin/$OUTPUT_NAME ./src/main.go"
+    elif [ "$GOOS" == "darwin" ]; then
+        # macOS构建使用本地环境
+        echo "Building darwin binary locally..."
+        env CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o ./bin/$OUTPUT_NAME ./src/main.go
     else
-        # 如果没有Docker，尝试直接在本地构建
-        echo "Docker not available, trying to build locally..."
-        if [ "$GOOS" == "linux" ]; then
-            # 对于Linux，尝试使用本地Go环境
-            if [ "$(uname)" == "Linux" ]; then
-                # 如果当前是Linux环境，启用CGO
-                echo "Building Linux binary locally with CGO enabled..."
-                env CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o ./bin/$OUTPUT_NAME ./src/main.go
-            else
-                # 如果不是Linux环境，禁用CGO
-                echo "Building Linux binary locally with CGO disabled..."
-                env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ./bin/$OUTPUT_NAME ./src/main.go
-            fi
-        elif [ "$GOOS" == "darwin" ]; then
-            # 对于macOS，尝试使用本地Go环境
-            if [ "$(uname)" == "Darwin" ]; then
-                # 如果当前是macOS环境，启用CGO
-                echo "Building macOS binary locally with CGO enabled..."
-                env CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o ./bin/$OUTPUT_NAME ./src/main.go
-            else
-                # 如果不是macOS环境，禁用CGO
-                echo "Building macOS binary locally with CGO disabled..."
-                env CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o ./bin/$OUTPUT_NAME ./src/main.go
-            fi
-        else
-            # Windows构建禁用CGO
-            echo "Building Windows binary locally with CGO disabled..."
-            env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o ./bin/$OUTPUT_NAME ./src/main.go
-        fi
+        # Windows构建禁用CGO
+        echo "Building windows binary with CGO disabled..."
+        env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o ./bin/$OUTPUT_NAME ./src/main.go
     fi
 
-    # 检查构建是否成功
-    if [ -f "./bin/$OUTPUT_NAME" ]; then
-        echo "Successfully built binary for $GOOS/$GOARCH: ./bin/$OUTPUT_NAME"
-    else
-        echo "Failed to build binary for $GOOS/$GOARCH"
-    fi
+    # 生成 SHA256 校验和文件
+#    echo "Generating SHA256 checksum for $OUTPUT_NAME..."
+#    if command -v sha256sum >/dev/null 2>&1; then
+#        (cd bin && sha256sum $OUTPUT_NAME | cut -d ' ' -f1 > ${OUTPUT_NAME}.sha256)
+#    else
+#        # macOS 使用 shasum 命令
+#        (cd bin && shasum -a 256 $OUTPUT_NAME | cut -d ' ' -f1 > ${OUTPUT_NAME}.sha256)
+#    fi
 }
 
 # 主构建流程
@@ -139,20 +96,16 @@ echo "Build completed!"
 
 # Docker 相关操作
 if [ "$BUILD_DOCKER" = true ]; then
-    if command -v docker &> /dev/null; then
-        echo "Building Docker image..."
-        docker build -t ${APP_NAME}:${VERSION} .
-        
-        echo "Tagging Docker image..."
-        docker tag ${APP_NAME}:${VERSION} ${DOCKER_REPO}/${APP_NAME}:${VERSION}
-        docker tag ${APP_NAME}:${VERSION} ${DOCKER_REPO}/${APP_NAME}:latest
-        
-        echo "Pushing Docker image..."
-        docker push ${DOCKER_REPO}/${APP_NAME}:${VERSION}
-        docker push ${DOCKER_REPO}/${APP_NAME}:latest
-        
-        echo "Docker image pushed successfully!"
-    else
-        echo "Docker is not installed. Cannot build and push Docker image."
-    fi
+    echo "Building Docker image..."
+    docker build -t ${APP_NAME}:${VERSION} .
+    
+    echo "Tagging Docker image..."
+    docker tag ${APP_NAME}:${VERSION} ${DOCKER_REPO}/${APP_NAME}:${VERSION}
+    docker tag ${APP_NAME}:${VERSION} ${DOCKER_REPO}/${APP_NAME}:latest
+    
+    echo "Pushing Docker image..."
+    docker push ${DOCKER_REPO}/${APP_NAME}:${VERSION}
+    docker push ${DOCKER_REPO}/${APP_NAME}:latest
+    
+    echo "Docker image pushed successfully!"
 fi

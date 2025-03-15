@@ -67,67 +67,78 @@ func (f *NsFeed) SetBot(bot BotNotifier) *NsFeed {
 func (f *NsFeed) startQueueConsumer() {
 	defer rescue.Recover()
 
-	f.logger.Infow("starting message queue consumer")
+	f.logger.Infow("starting message queue consumer with batching")
 
 	// 计算消息发送间隔，保证每秒最多发送20条消息
-	interval := time.Millisecond * 50 // 1000ms / 20 = 50ms
+	const interval = time.Millisecond * 50     // 1000ms / 20 = 50ms
+	const batchSize = 10                       // 批处理大小
+	const batchWindow = 500 * time.Millisecond // 批处理时间窗口
 
-	// 使用动态 ticker 模式，只在有消息时才激活 ticker
-	var ticker *time.Ticker
-	var tickerC <-chan time.Time
+	var messageBatch []*NotifyMessage
+	ticker := time.NewTicker(batchWindow)
+	defer ticker.Stop()
 
 	// 用于限制发送速率的时间点
-	var nextSendTime time.Time
+	nextSendTime := time.Now()
 
 	for {
 		select {
 		case <-f.ctx.Done():
 			f.logger.Infow("message queue consumer stopped due to context done")
-			if ticker != nil {
-				ticker.Stop()
-			}
 			return
 
 		case msg := <-f.msgQueue:
-			// 只有在收到消息时才创建或使用 ticker
-			now := time.Now()
-
-			// 如果已经到了可以发送的时间，直接发送
-			if now.After(nextSendTime) {
-				if msg != nil && f.bot != nil {
-					f.logger.Debugw("sending message from queue immediately", logx.Field("chatId", msg.ChatId))
-					f.bot.Notify(*msg)
-					nextSendTime = now.Add(interval)
-				}
-				continue
+			if msg != nil {
+				messageBatch = append(messageBatch, msg)
 			}
 
-			// 如果还没到发送时间，需要等待
-			if ticker == nil {
-				ticker = time.NewTicker(interval)
-				tickerC = ticker.C
+			// 如果批次已满，立即处理
+			if len(messageBatch) >= batchSize {
+				now := time.Now()
+				// 如果已经到了可以发送的时间，处理批次
+				if now.After(nextSendTime) {
+					f.processBatch(messageBatch)
+					messageBatch = nil
+					nextSendTime = now.Add(interval * time.Duration(batchSize))
+				}
 			}
 
-			// 等待发送时间
-			select {
-			case <-tickerC:
-				if msg != nil && f.bot != nil {
-					f.logger.Debugw("sending message from queue after wait", logx.Field("chatId", msg.ChatId))
-					f.bot.Notify(*msg)
-					nextSendTime = time.Now().Add(interval)
+		case <-ticker.C:
+			// 定期处理积累的消息，即使未达到批处理大小
+			if len(messageBatch) > 0 {
+				now := time.Now()
+				if now.After(nextSendTime) {
+					f.processBatch(messageBatch)
+					messageBatch = nil
+					nextSendTime = now.Add(interval * time.Duration(len(messageBatch)))
 				}
-			case <-f.ctx.Done():
-				f.logger.Infow("message queue consumer stopped during wait")
-				ticker.Stop()
-				return
 			}
 		}
+	}
+}
 
-		// 如果队列为空，停止 ticker 以节省资源
-		if len(f.msgQueue) == 0 && ticker != nil {
-			ticker.Stop()
-			ticker = nil
-			tickerC = nil
+// 批量处理消息
+func (f *NsFeed) processBatch(messages []*NotifyMessage) {
+	if len(messages) == 0 || f.bot == nil {
+		return
+	}
+
+	// 按聊天ID分组
+	chatGroups := make(map[int64][]*NotifyMessage)
+	for _, msg := range messages {
+		if msg.ChatId != nil {
+			chatGroups[*msg.ChatId] = append(chatGroups[*msg.ChatId], msg)
+		}
+	}
+
+	// 对每个聊天ID的消息进行处理
+	for chatID, msgs := range chatGroups {
+		f.logger.Debugw("processing message batch", logx.Field("chatId", chatID), logx.Field("count", len(msgs)))
+
+		// 使用有限速率发送单条消息
+		for _, msg := range msgs {
+			f.bot.Notify(*msg)
+			time.Sleep(50 * time.Millisecond) // 控制发送速率
 		}
 	}
 }
@@ -184,6 +195,17 @@ func hasKeywordWithRegexCached(title string, keyword string) bool {
 func hasKeyword(title string, keywords []string) bool {
 	title = strings.ToLower(title)
 	for _, keyword := range keywords {
+		// 检查是否包含特殊字符，判断是否需要正则匹配
+		needsRegex := strings.ContainsAny(keyword, "^$.*+?()[]{}|\\~+")
+
+		if !needsRegex {
+			// 简单的字符串包含检查
+			if strings.Contains(title, strings.ToLower(keyword)) {
+				return true
+			}
+			continue
+		}
+
 		// 首先尝试表达式匹配，这通常更快
 		if hasKeywordWithExpression(title, keyword) {
 			return true
@@ -312,34 +334,71 @@ func removeHash(u string) (string, error) {
 }
 
 func (f *NsFeed) sendMessage(c *MessageOption, feedName string, items []*gofeed.Item) {
+	if len(items) == 0 {
+		return
+	}
+
+	// 1. 收集所有 URL 和符合关键词的条目
+	urls := make([]string, 0, len(items))
+	urlToItem := make(map[string]*gofeed.Item)
 
 	for _, item := range items {
-		item.Link, _ = removeHash(item.Link)
-		if item.Link == "" {
+		cleanUrl, err := removeHash(item.Link)
+		if err != nil || cleanUrl == "" {
 			continue
 		}
-		exists := db.GetNotifyHistory(c.ChatId, item.Link) != nil
-		if hasKeyword(item.Title, c.Keywords) && !exists {
 
-			db.AddNotifyHistory(&db.NotifyHistory{
-				ChatId: c.ChatId,
-				Url:    item.Link,
-				Title:  item.Title,
-			})
-			if f.bot != nil {
-				msg := NotifyMessage{
-					Text: fmt.Sprintf("📢  *%s*\n\n🕐 %s\n\n👉 %s",
-						item.Title,
-						item.PublishedParsed.Add(time.Hour*8).Format("2006-01-02 15:04:05"),
-						item.Link),
-					ChatId: &c.ChatId,
-				}
-
-				f.bot.Notify(msg)
-			}
+		// 只处理符合关键词条件的条目
+		if hasKeyword(item.Title, c.Keywords) {
+			urls = append(urls, cleanUrl)
+			urlToItem[cleanUrl] = item
 		}
 	}
 
+	if len(urls) == 0 {
+		return
+	}
+
+	// 2. 批量查询已存在的通知
+	existingMap := db.GetNotifyHistoryBatch(c.ChatId, urls)
+
+	// 3. 处理新通知
+	var newNotifications []*db.NotifyHistory
+
+	for url, item := range urlToItem {
+		// 检查是否已存在
+		if existingMap[url] {
+			continue
+		}
+
+		// 添加到新通知列表
+		newNotifications = append(newNotifications, &db.NotifyHistory{
+			ChatId: c.ChatId,
+			Url:    url,
+			Title:  item.Title,
+		})
+
+		// 发送消息
+		if f.bot != nil {
+			msg := NotifyMessage{
+				Text: fmt.Sprintf("📢  *%s*\n\n🕐 %s\n\n👉 %s",
+					item.Title,
+					item.PublishedParsed.Add(time.Hour*8).Format("2006-01-02 15:04:05"),
+					url),
+				ChatId: &c.ChatId,
+			}
+
+			f.Add(msg)
+		}
+	}
+
+	// 4. 批量插入新通知记录
+	if len(newNotifications) > 0 {
+		err := db.AddNotifyHistoryBatch(newNotifications)
+		if err != nil {
+			f.logger.Errorw("批量添加通知历史失败", logx.Field("err", err), logx.Field("count", len(newNotifications)))
+		}
+	}
 }
 
 var isRunning bool
@@ -550,15 +609,19 @@ func (f *NsFeed) fetchRssAdaptive(feed *db.FeedConfig) error {
 		return c.Status == "on" || c.Status == ""
 	}).([]*db.Subscribe)
 
+	if len(subscribes) == 0 {
+		return nil
+	}
+
 	// 使用工作池模式处理订阅消息
 	// 创建任务通道
 	type subscribeTask struct {
 		subscribe *db.Subscribe
-		item      *gofeed.Item
+		items     []*gofeed.Item
 	}
 
 	// 估算任务总数
-	taskCount := len(subscribes) * len(resp.Items)
+	taskCount := len(subscribes)
 	if taskCount == 0 {
 		return nil
 	}
@@ -587,18 +650,16 @@ func (f *NsFeed) fetchRssAdaptive(feed *db.FeedConfig) error {
 					ChatId:   task.subscribe.ChatId,
 					FeedName: feed.Name,
 					Keywords: subKeys.KeywordsArray,
-				}, feed.Name, []*gofeed.Item{task.item})
+				}, feed.Name, task.items)
 			}
 		}()
 	}
 
 	// 分发任务
 	for _, subscribe := range subscribes {
-		for _, item := range resp.Items {
-			taskChan <- subscribeTask{
-				subscribe: subscribe,
-				item:      item,
-			}
+		taskChan <- subscribeTask{
+			subscribe: subscribe,
+			items:     resp.Items,
 		}
 	}
 
