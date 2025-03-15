@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	json "github.com/bytedance/sonic"
@@ -40,7 +41,9 @@ var helpText = `
 `
 
 var (
-	tgBot *tgbotapi.BotAPI
+	tgBot          *tgbotapi.BotAPI
+	mainMenu       tgbotapi.InlineKeyboardMarkup
+	lastMessageIDs sync.Map // 存储每个chat的最后一条消息ID
 )
 
 // ChatInfo 存储聊天相关信息
@@ -56,15 +59,9 @@ type CommandHandler func(*db.Subscribe, []string) (*tgbotapi.MessageConfig, erro
 
 // 命令处理器映射
 var commandHandlers = map[string]CommandHandler{
-	//cmdList:   handleList,
 	cmdFeed: handleFeed,
 	cmdAdd:  handleAdd,
-	//cmdDelete: handleDelete,
 	cmdHelp: handleHelp,
-	//cmdOn:     handleOn,
-	//cmdOff:    handleOff,
-	//cmdQuit:   handleQuit,
-	//cmdStart:  handleStart,
 }
 
 func InitTgBotListen(cnf *config.Config) {
@@ -81,7 +78,6 @@ func InitTgBotListen(cnf *config.Config) {
 	go updates(cnf)
 }
 
-var mainMenu tgbotapi.InlineKeyboardMarkup
 var backToMain = tgbotapi.NewInlineKeyboardButtonData("🔙返回主菜单",
 	(&vars.CallbackEvent[vars.CallbackBackToMain]{
 		Data: vars.CallbackBackToMain{},
@@ -103,11 +99,25 @@ func updates(cfg *config.Config) {
 			},
 		}
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(v.Name, event.Param()))
-
 	}
+
+	// 为管理员添加统计按钮
+	if cfg.AdminId != 0 {
+		statusEvent := &vars.CallbackEvent[vars.CallbackStatus]{
+			Data: vars.CallbackStatus{
+				ChatId: cfg.AdminId,
+			},
+		}
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("📊 统计", statusEvent.Param()))
+	}
+
 	mainMenu = tgbotapi.NewInlineKeyboardMarkup()
-	for _, button := range buttons {
-		mainMenu.InlineKeyboard = append(mainMenu.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(button))
+
+	chunkButton := funk.Chunk(buttons, 2).([][]tgbotapi.InlineKeyboardButton)
+	for _, keyboardButtons := range chunkButton {
+		row := make([]tgbotapi.InlineKeyboardButton, 0, len(keyboardButtons))
+		row = append(row, keyboardButtons...)
+		mainMenu.InlineKeyboard = append(mainMenu.InlineKeyboard, row)
 	}
 
 	for update := range updates {
@@ -199,14 +209,11 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 		case string(vars.EventSelectFeed):
 			// 获取完整的feed信息
 			feed := db.GetFeedConfigWithFeedId(event.Data.FeedId)
-
-			// 获取关键字列表
-
 			subscribe := db.ListSubscribeFeedWith(chatID, feed.FeedId)
 			if len(subscribe.KeywordsArray) > 0 {
 				var keywords []tgbotapi.InlineKeyboardButton
+
 				for _, v := range subscribe.KeywordsArray {
-					v = "🗑️ " + v
 					data := vars.CallbackEvent[vars.CallbackDeleteKeyword]{
 						Data: vars.CallbackDeleteKeyword{
 							Keyword: v,
@@ -217,7 +224,7 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 					if len(data.Param()) > 64 {
 						continue
 					}
-					keywords = append(keywords, tgbotapi.NewInlineKeyboardButtonData(v, data.Param()))
+					keywords = append(keywords, tgbotapi.NewInlineKeyboardButtonData("🗑️ "+v, data.Param()))
 				}
 				keyboard := tgbotapi.NewInlineKeyboardMarkup()
 
@@ -228,8 +235,13 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 					},
 				}
 
-				for _, keyword := range keywords {
-					keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(keyword))
+				//2个一行
+				chunkButton := funk.Chunk(keywords, 2).([][]tgbotapi.InlineKeyboardButton)
+
+				for _, buttons := range chunkButton {
+					row := make([]tgbotapi.InlineKeyboardButton, 0, 2)
+					row = append(row, buttons...)
+					keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, row)
 				}
 
 				keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(
@@ -237,7 +249,7 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 				)
 				keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(backToMain))
 
-				msg := tgbotapi.NewMessage(chatID, "以下是您已添加的关键字:")
+				msg := tgbotapi.NewMessage(chatID, "以下是您已添加的 "+feed.Name+" 关键字:")
 				msg.ReplyMarkup = keyboard
 				msg.ParseMode = tgbotapi.ModeHTML
 				sendMessage(&msg)
@@ -354,6 +366,79 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 			msg, _ := handleOff(subscriber, nil)
 			sendMessage(msg)
 			return
+		case string(vars.EventStatus):
+			var statusEvent vars.CallbackEvent[vars.CallbackStatus]
+			if err := json.Unmarshal([]byte(callbackData), &statusEvent); err != nil {
+				return
+			}
+
+			// 只允许管理员访问
+			if chatID != cfg.AdminId {
+				msg := tgbotapi.NewMessage(chatID, "抱歉，只有管理员可以查看统计信息")
+				sendMessage(&msg)
+				return
+			}
+
+			subscribers := db.ListSubscribes()
+			todaySend := db.GetNotifyCountByDateTime(carbon.Now().StartOfDay().StdTime(), time.Now())
+
+			ip := getPublicIP()
+			if ip != "" {
+				parts := strings.Split(ip, ".")
+				ip = strings.Join(parts[:3], ".") + ".*"
+			} else {
+				ip = "未知"
+			}
+
+			// 计算活跃用户数（status为"on"的用户）
+			var activeUsers int
+			for _, sub := range subscribers {
+				if sub.Status == "on" || sub.Status == "" {
+					activeUsers++
+				}
+			}
+
+			// 获取所有Feed的统计信息
+
+			message := fmt.Sprintf("📊 系统统计\n"+
+				"-------------------\n"+
+				"👥 总用户数: %d\n"+
+				"✅ 活跃用户: %d\n"+
+				"📨 今日推送: %d\n"+
+				"🌐 当前IP: %s\n"+
+				"-------------------\n",
+				len(subscribers),
+				activeUsers,
+				todaySend,
+				ip,
+			)
+
+			// 创建刷新按钮
+			refreshEvent := vars.CallbackEvent[vars.CallbackStatus]{
+				Data: vars.CallbackStatus{
+					ChatId: chatID,
+				},
+			}
+
+			// 验证callback_data长度
+			if len(refreshEvent.Param()) > 64 {
+				msg := tgbotapi.NewMessage(chatID, "抱歉，刷新按钮暂时不可用")
+				sendMessage(&msg)
+				return
+			}
+
+			keyboard := tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("🔄 刷新", refreshEvent.Param()),
+					backToMain,
+				),
+			)
+
+			msg := tgbotapi.NewMessage(chatID, message)
+			msg.ReplyMarkup = keyboard
+			msg.ParseMode = tgbotapi.ModeHTML
+			sendMessage(&msg)
+			return
 		}
 		return
 	}
@@ -395,16 +480,18 @@ func processMessage(cfg *config.Config, update tgbotapi.Update) {
 func ensureSubscriber(info *ChatInfo) *db.Subscribe {
 	subscriber := db.GetSubscribeWithChatId(info.ChatID)
 	if subscriber == nil {
-		tgBot.Send(tgbotapi.NewMessage(info.ChatID, "欢迎使用 NS 论坛关键字通知功能，这是您的首次使用, 请用 /help 查看帮助说明。"))
-		db.AddSubscribe(&db.Subscribe{
+		newSubscriber := &db.Subscribe{
 			Name:      info.Name,
 			ChatId:    info.ChatID,
 			Status:    "on",
 			Type:      info.ChatType,
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
-		})
-		subscriber = db.GetSubscribeWithChatId(info.ChatID)
+		}
+		db.AddSubscribe(newSubscriber)
+		subscriber = newSubscriber
+		welcomeMsg := tgbotapi.NewMessage(info.ChatID, "这是您的首次使用, 请用 /help 查看帮助说明。")
+		sendMessage(&welcomeMsg)
 	}
 	return subscriber
 }
@@ -428,29 +515,44 @@ func splitAndClean(text string) []string {
 
 // sendMessage 发送消息
 func sendMessage(msg *tgbotapi.MessageConfig) {
-	//msg.ParseMode = tgbotapi.ModeMarkdown
+	if msg.ParseMode == "" {
+		msg.ParseMode = tgbotapi.ModeMarkdown
+		// 如果使用Markdown模式，自动转义特殊字符
+		msg.Text = escapeMarkdown(msg.Text)
+	}
 	result, err := tgBot.Send(msg)
 	if err != nil {
 		log.WithField("msg", msg.Text).
-			WithField("error", err).
-			Error("send message failure")
-	} else {
-		log.WithField("msg", msg.Text).
-			WithField("result id", result.MessageID).
-			Info("send message success")
+			WithError(err).
+			Error("Failed to send message")
+		return
 	}
-}
 
-// 命令处理函数
-func handleList(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
+	// 如果消息带有ReplyMarkup
+	if msg.ReplyMarkup != nil {
+		// 获取上一条消息的ID
+		if lastID, ok := lastMessageIDs.Load(msg.ChatID); ok {
+			// 删除上一条消息
+			go func(chatID int64, messageID int) {
+				time.Sleep(2 * time.Second)
+				deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+				_, err := tgBot.Request(deleteMsg)
+				if err != nil {
+					log.WithError(err).
+						WithField("chat_id", chatID).
+						WithField("message_id", messageID).
+						Error("Failed to delete message")
+				}
+			}(msg.ChatID, lastID.(int))
+		}
 
-	keys := db.ListSubscribeFeedConfig(sub.ChatId)
-	var sb strings.Builder
-	for k, v := range keys {
-		sb.WriteString(fmt.Sprintf("feed源: %s, 关键字: %s\n", k, strings.Join(v, " , ")))
+		// 更新最后一条消息的ID
+		lastMessageIDs.Store(msg.ChatID, result.MessageID)
 	}
-	msg := tgbotapi.NewMessage(sub.ChatId, "当前配置的关键字: \n"+sb.String())
-	return &msg, nil
+
+	log.WithField("msg", msg.Text).
+		WithField("chat_id", msg.ChatID).
+		Info("Message sent")
 }
 
 // 命令处理函数
@@ -471,7 +573,7 @@ func handleAdd(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, error
 	// 检查是否存在该feedId
 	v := db.GetFeedConfigWithFeedId(feedId)
 	if v.ID == 0 {
-		return nil, errors.New("该feedId不存在, 请先使用 /feed 查看支持的feedId")
+		return nil, errors.New("未找到该feed")
 	}
 
 	args = args[1:]
@@ -479,6 +581,24 @@ func handleAdd(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, error
 	args = funk.Map(args, func(s string) string {
 		return strings.Trim(strings.TrimSpace(s), "{}")
 	}).([]string)
+
+	// 检查每个关键字的callback_data长度
+	var invalidKeywords []string
+	for _, keyword := range args {
+		data := vars.CallbackEvent[vars.CallbackDeleteKeyword]{
+			Data: vars.CallbackDeleteKeyword{
+				Keyword: keyword,
+				FeedId:  feedId,
+			},
+		}
+		if len(data.Param()) > 64 {
+			invalidKeywords = append(invalidKeywords, keyword)
+		}
+	}
+
+	if len(invalidKeywords) > 0 {
+		return nil, fmt.Errorf("以下关键字太长，请缩短后重新添加：\n%s", strings.Join(invalidKeywords, "\n"))
+	}
 
 	//更新db
 	exists := db.ListSubscribeFeedWith(sub.ChatId, feedId)
@@ -520,8 +640,12 @@ func handleAdd(sub *db.Subscribe, args []string) (*tgbotapi.MessageConfig, error
 			},
 		}
 
-		for _, keyword := range keywords {
-			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(keyword))
+		chunkKeywords := funk.Chunk(keywords, 2).([][]tgbotapi.InlineKeyboardButton)
+
+		for _, keyboardButtons := range chunkKeywords {
+			row := make([]tgbotapi.InlineKeyboardButton, 0, len(keyboardButtons))
+			row = append(row, keyboardButtons...)
+			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, row)
 		}
 
 		keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(
@@ -578,7 +702,7 @@ func handleHelp(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) 
 		},
 	}
 	button := tgbotapi.NewInlineKeyboardButtonData("开启关键字通知", on.Param())
-	if sub.Status == "on" {
+	if sub.Status == "on" || sub.Status == "" {
 		off := vars.CallbackEvent[vars.CallbackStatusOff]{
 			Data: vars.CallbackStatusOff{
 				ChatId: sub.ChatId,
@@ -609,21 +733,6 @@ func handleOff(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
 	return &msg, nil
 }
 
-func handleStart(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
-	sub.Status = "on"
-	db.UpdateSubscribe(sub)
-	msg := tgbotapi.NewMessage(sub.ChatId, "欢迎回来, 请用 /help 查看帮助说明。")
-	return &msg, nil
-
-}
-
-func handleQuit(sub *db.Subscribe, _ []string) (*tgbotapi.MessageConfig, error) {
-	sub.Status = "quit"
-	db.UpdateSubscribe(sub)
-	msg := tgbotapi.NewMessage(sub.ChatId, "Bye~您现在可以移除本机器人了\n期待您的再次使用")
-	return &msg, nil
-}
-
 func handleStatus(sub *db.Subscribe) {
 	subscribers := db.ListSubscribes()
 	todaySend := db.GetNotifyCountByDateTime(carbon.Now().StartOfDay().StdTime(), time.Now())
@@ -631,7 +740,7 @@ func handleStatus(sub *db.Subscribe) {
 	ip := getPublicIP()
 	if ip != "" {
 		parts := strings.Split(ip, ".")
-		ip = fmt.Sprintf("%s.\\*.%s.%s", parts[0], parts[2], parts[3])
+		ip = fmt.Sprintf("%s.*.%s.%s", parts[0], parts[2], parts[3])
 	} else {
 		ip = "未知"
 	}
@@ -639,6 +748,7 @@ func handleStatus(sub *db.Subscribe) {
 	message := fmt.Sprintf("当前状态: \n订阅数: %d \n当天发送: %d \n当前IP: %s",
 		len(subscribers), todaySend, ip)
 	msg := tgbotapi.NewMessage(sub.ChatId, message)
+	msg.ParseMode = tgbotapi.ModeHTML
 	sendMessage(&msg)
 }
 
@@ -654,4 +764,29 @@ func getPublicIP() string {
 
 func TgBotInstance() *tgbotapi.BotAPI {
 	return tgBot
+}
+
+// escapeMarkdown 转义Markdown特殊字符
+func escapeMarkdown(text string) string {
+	replacer := strings.NewReplacer(
+		"_", "\\_",
+		"*", "\\*",
+		"[", "\\[",
+		"]", "\\]",
+		"(", "\\(",
+		")", "\\)",
+		"~", "\\~",
+		"`", "\\`",
+		">", "\\>",
+		"#", "\\#",
+		"+", "\\+",
+		"-", "\\-",
+		"=", "\\=",
+		"|", "\\|",
+		"{", "\\{",
+		"}", "\\}",
+		".", "\\.",
+		"!", "\\!",
+	)
+	return replacer.Replace(text)
 }
